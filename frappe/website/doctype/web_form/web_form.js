@@ -43,6 +43,7 @@ frappe.ui.form.on("Web Form", {
 		on_controlled_access_change(frm);
 
 		frm.trigger("set_fields");
+		frm.trigger("align_checkboxes_to_field_rows");
 		frm.trigger("add_get_fields_button");
 		frm.trigger("add_publish_button");
 		frm.trigger("render_condition_table");
@@ -84,6 +85,29 @@ frappe.ui.form.on("Web Form", {
 			frm.set_value("published", !frm.doc.published);
 			frm.save();
 		});
+	},
+
+	align_checkboxes_to_field_rows(frm) {
+		// A checkbox control is much shorter than a label-plus-input one, so each
+		// checkbox in this column starts higher than the last, and by `is_standard`
+		// the squares no longer line up with the fields opposite. Give every checkbox
+		// the pitch of a real field row so the two columns stay in step.
+		//
+		// The pitch is measured off a rendered row instead of hardcoded, so it tracks
+		// whatever the theme and breakpoint make it -- `--checkbox-size` alone doubles
+		// between mobile and desktop, and a fixed value would only ever be right at one
+		// of them. Bail if the tab hasn't been laid out yet and there's nothing to read.
+		let row_pitch = frm.get_field("route")?.$wrapper.outerHeight(true);
+		if (!row_pitch) return;
+
+		for (let fieldname of ["is_new_doctype", "is_standard"]) {
+			// `min-height`, not `height`, so a longer label wrapping to a second line
+			// pushes the column down rather than overlapping what follows.
+			frm.get_field(fieldname)?.$wrapper.css({
+				"min-height": `${row_pitch}px`,
+				"margin-bottom": "0",
+			});
+		}
 	},
 
 	add_get_fields_button(frm) {

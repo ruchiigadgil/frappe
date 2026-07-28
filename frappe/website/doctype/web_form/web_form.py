@@ -74,6 +74,7 @@ class WebForm(WebsiteGenerator):
 		meta_image: DF.AttachImage | None
 		meta_title: DF.Data | None
 		module: DF.Link | None
+		new_doctype_name: DF.Data | None
 		print_format: DF.Link | None
 		published: DF.Check
 		route: DF.Data | None
@@ -204,6 +205,15 @@ class WebForm(WebsiteGenerator):
 	def create_new_doctype(self, fields) -> str:
 		"""Create the DocType this Web Form owns and return its name.
 
+		Uses `new_doctype_name` if the user set one, else falls back to
+		`WebForm-{title}`; either way it's passed through the same
+		collision-suffixing helper, so a name clash never hard-fails the save.
+
+		`module` is required here exactly like it is when creating any other
+		DocType (`module.reqd == 1` on the DocType doctype itself) -- no silent
+		default, so `mandatory_depends_on` on the Web Form's own `module` field
+		enforces the same thing before the user even gets here.
+
 		Grants Desk-side access to System Manager only; the public submit / edit /
 		delete / list flow never relies on DocPerm, it goes through
 		`has_web_form_permission` and saves with `ignore_permissions=True` once that
@@ -212,8 +222,10 @@ class WebForm(WebsiteGenerator):
 		doctype = frappe.get_doc(
 			{
 				"doctype": "DocType",
-				"name": append_number_if_name_exists("DocType", f"WebForm-{self.title}"),
-				"module": self.module or "Website",
+				"name": append_number_if_name_exists(
+					"DocType", self.new_doctype_name or f"WebForm-{self.title}"
+				),
+				"module": self.module,
 				"custom": 1,
 				"fields": fields,
 				"permissions": [

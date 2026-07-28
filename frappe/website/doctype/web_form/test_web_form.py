@@ -1106,6 +1106,22 @@ class TestWebForm(IntegrationTestCase):
 		self.addCleanup(cleanup)
 		return web_form
 
+	def test_is_new_doctype_requires_module(self):
+		"""`module` must be required when creating a new DocType, exactly like it
+		already is (`reqd: 1`) when creating any other DocType directly -- no
+		silent fallback to a hardcoded module. Fails before any table is created,
+		since DocType's own mandatory check runs before `on_update`/`updatedb`."""
+		web_form = frappe.get_doc(
+			{
+				"doctype": "Web Form",
+				"title": f"_Test No Module Form {frappe.generate_hash(length=6)}",
+				"is_new_doctype": 1,
+				"web_form_fields": [{"label": "Full Name", "fieldtype": "Data"}],
+			}
+		)
+		with self.assertRaises(frappe.MandatoryError):
+			web_form.insert(ignore_permissions=True)
+
 	def test_is_new_doctype_creates_backing_doctype(self):
 		"""`is_new_doctype=1` must create a DocType from `web_form_fields` on first
 		save and point `doc_type` at it, without `doc_type` ever being set up front
@@ -1125,6 +1141,14 @@ class TestWebForm(IntegrationTestCase):
 		self.assertEqual(meta.get_field("full_name").fieldtype, "Data")
 		self.assertTrue(meta.has_field("salary"))
 		self.assertEqual(meta.get_field("salary").fieldtype, "Currency")
+
+	def test_is_new_doctype_honors_custom_doctype_name(self):
+		"""Setting `new_doctype_name` must name the generated DocType directly
+		instead of falling back to `WebForm-{title}`."""
+		web_form = self.create_new_doctype_web_form(new_doctype_name="Test Custom Fleet Doctype")
+
+		self.assertEqual(web_form.doc_type, "Test Custom Fleet Doctype")
+		self.assertTrue(frappe.db.exists("DocType", "Test Custom Fleet Doctype"))
 
 	def test_is_new_doctype_accepts_submissions_end_to_end(self):
 		"""The generated DocType must be immediately usable through the normal
