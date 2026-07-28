@@ -11,6 +11,7 @@
   "route",
   "published",
   "column_break_vdhm",
+  "is_new_doctype",
   "doc_type",
   "module",
   "is_standard",
@@ -85,13 +86,23 @@
    "unique": 1
   },
   {
+   "default": "0",
+   "description": "Create a new DocType for this form instead of linking to an existing one. The new DocType is owned by this form, so its fields can be added, edited or removed freely.",
+   "fieldname": "is_new_doctype",
+   "fieldtype": "Check",
+   "label": "Create New DocType",
+   "read_only_depends_on": "eval:!doc.__islocal"
+  },
+  {
+   "depends_on": "eval:!doc.is_new_doctype",
    "fieldname": "doc_type",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Select DocType",
+   "mandatory_depends_on": "eval:!doc.is_new_doctype",
    "options": "DocType",
-   "reqd": 1
+   "read_only_depends_on": "eval:doc.is_new_doctype"
   },
   {
    "fieldname": "module",

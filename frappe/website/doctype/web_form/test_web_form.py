@@ -1074,6 +1074,165 @@ class TestWebForm(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
+	def create_new_doctype_web_form(self, extra_fields=None, **web_form_settings):
+		"""Insert a Web Form with `is_new_doctype=1` and return it.
+
+		Cleans up both the generated DocType record and its underlying database
+		table: `CREATE TABLE`/`ALTER TABLE` are DDL and are not rolled back with the
+		rest of the test transaction, so they must be dropped explicitly.
+		"""
+		fields = extra_fields or [
+			{"label": "Full Name", "fieldtype": "Data", "reqd": 1},
+			{"label": "Salary", "fieldtype": "Currency"},
+		]
+		web_form = frappe.get_doc(
+			{
+				"doctype": "Web Form",
+				"title": f"_Test New DocType Form {frappe.generate_hash(length=6)}",
+				"is_new_doctype": 1,
+				"module": "Website",
+				"web_form_fields": fields,
+				**web_form_settings,
+			}
+		)
+		web_form.insert(ignore_permissions=True)
+
+		def cleanup():
+			doctype_name = web_form.doc_type
+			frappe.delete_doc("Web Form", web_form.name, ignore_permissions=True, force=True)
+			frappe.delete_doc("DocType", doctype_name, ignore_permissions=True, force=True)
+			frappe.db.sql_ddl(f"DROP TABLE IF EXISTS `tab{doctype_name}`")
+
+		self.addCleanup(cleanup)
+		return web_form
+
+	def test_is_new_doctype_creates_backing_doctype(self):
+		"""`is_new_doctype=1` must create a DocType from `web_form_fields` on first
+		save and point `doc_type` at it, without `doc_type` ever being set up front
+		-- this is the "create new DocType inline" path from the design discussion,
+		as opposed to linking an existing DocType."""
+		web_form = self.create_new_doctype_web_form()
+
+		self.assertTrue(web_form.doc_type)
+		self.assertTrue(web_form.doc_type.startswith(f"WebForm-{web_form.title}"))
+
+		doctype = frappe.get_doc("DocType", web_form.doc_type)
+		self.assertEqual(doctype.custom, 1)
+		self.assertEqual({row.role for row in doctype.permissions}, {"System Manager"})
+
+		meta = frappe.get_meta(web_form.doc_type)
+		self.assertTrue(meta.has_field("full_name"))
+		self.assertEqual(meta.get_field("full_name").fieldtype, "Data")
+		self.assertTrue(meta.has_field("salary"))
+		self.assertEqual(meta.get_field("salary").fieldtype, "Currency")
+
+	def test_is_new_doctype_accepts_submissions_end_to_end(self):
+		"""The generated DocType must be immediately usable through the normal
+		`accept()` submission flow used by every other Web Form -- nothing about
+		rendering or submission is aware of which path created `doc_type`."""
+		web_form = self.create_new_doctype_web_form()
+
+		frappe.set_user("Administrator")
+		doc = accept(
+			web_form=web_form.name,
+			data=json.dumps(
+				{"doctype": web_form.doc_type, "full_name": "_Test New Doctype Person", "salary": 50000}
+			),
+		)
+
+		self.assertEqual(doc.full_name, "_Test New Doctype Person")
+		self.assertEqual(doc.salary, 50000)
+
+	def test_is_new_doctype_syncs_new_field_on_update(self):
+		"""Adding a row to `web_form_fields` after creation must add the matching
+		field to the backing DocType on the next save, so a field added later works
+		exactly like one added at creation."""
+		web_form = self.create_new_doctype_web_form()
+
+		web_form.append("web_form_fields", {"label": "Department", "fieldtype": "Data"})
+		web_form.save(ignore_permissions=True)
+
+		meta = frappe.get_meta(web_form.doc_type)
+		self.assertTrue(meta.has_field("department"))
+
+	def test_is_new_doctype_skips_page_break_fields(self):
+		"""`Page Break` is a Web Form-only pagination marker (splits the public form
+		into pages) with no DocField equivalent -- it must stay on the form's own
+		field list for rendering, but never reach the backing DocType's schema."""
+		web_form = self.create_new_doctype_web_form(
+			extra_fields=[
+				{"label": "Full Name", "fieldtype": "Data"},
+				{"label": "Page 2", "fieldtype": "Page Break"},
+				{"label": "Department", "fieldtype": "Data"},
+			]
+		)
+
+		self.assertTrue(any(f.fieldtype == "Page Break" for f in web_form.web_form_fields))
+
+		meta = frappe.get_meta(web_form.doc_type)
+		self.assertFalse(any(f.fieldtype == "Page Break" for f in meta.fields))
+
+	def test_is_new_doctype_field_sync_is_a_noop_when_fields_unchanged(self):
+		"""Re-saving the Web Form without touching `web_form_fields` must not
+		re-save the backing DocType. This is the efficiency guard in
+		`get_field_signature` -- without it, every save of an unrelated setting
+		(e.g. the introduction text) would trigger a full DocType schema-sync
+		check (`frappe.db.updatedb`)."""
+		web_form = self.create_new_doctype_web_form()
+		modified_before = frappe.db.get_value("DocType", web_form.doc_type, "modified")
+
+		web_form.introduction_text = "_Test unrelated change"
+		web_form.save(ignore_permissions=True)
+
+		modified_after = frappe.db.get_value("DocType", web_form.doc_type, "modified")
+		self.assertEqual(modified_before, modified_after)
+
+	def test_is_new_doctype_derives_fieldname_from_label(self):
+		"""A row saved without an explicit `fieldname` (the client leaves it blank
+		and derives it from `label` once `is_new_doctype` is set, mirroring Custom
+		Field's own label-to-fieldname convention) must have the server derive one
+		too, so the field is still usable even if the client-side derivation is
+		skipped (e.g. a direct API insert)."""
+		web_form = self.create_new_doctype_web_form(
+			extra_fields=[{"label": "Preferred Contact Method", "fieldtype": "Data"}]
+		)
+
+		self.assertEqual(web_form.web_form_fields[0].fieldname, "preferred_contact_method")
+
+	def test_is_new_doctype_sanitizes_fieldname_typed_directly(self):
+		"""`fieldname` is free text in New DocType mode (see `set_fields` in
+		web_form.js), so a user can type a human label like "Driver Name" straight
+		into it instead of the intended `label` column. Found via manual testing:
+		this reached `DocType.insert()` unsanitized and failed with
+		`InvalidColumnName: Fieldname driver name cannot have special characters`.
+		The server must sanitize whatever ends up in `fieldname`, not just derive
+		it when blank."""
+		web_form = self.create_new_doctype_web_form(
+			extra_fields=[{"label": "Driver Name", "fieldname": "Driver Name", "fieldtype": "Data"}]
+		)
+
+		self.assertEqual(web_form.web_form_fields[0].fieldname, "driver_name")
+		meta = frappe.get_meta(web_form.doc_type)
+		self.assertTrue(meta.has_field("driver_name"))
+
+	def test_is_new_doctype_ignores_stale_reqd_on_layout_field(self):
+		"""A Section/Column Break row can be left with a stale `reqd=1` if it was
+		checked before the row's fieldtype was changed to a layout type (the
+		existing `fieldtype` handler in web_form.js clears fieldname/label/options
+		on that change, but not `reqd`). Found via manual testing: this reached
+		`DocType.insert()` and failed with `IllegalMandatoryError: Field ... of
+		type Section Break cannot be mandatory`. The server must not forward
+		`reqd` for fieldtypes that carry no value."""
+		web_form = self.create_new_doctype_web_form(
+			extra_fields=[
+				{"label": "Personal Info", "fieldtype": "Section Break", "reqd": 1},
+				{"label": "Full Name", "fieldtype": "Data"},
+			]
+		)
+
+		meta = frappe.get_meta(web_form.doc_type)
+		self.assertEqual(meta.get_field("personal_info").reqd, 0)
+
 	def set_web_form_settings(self, **settings):
 		current_settings = frappe.db.get_value("Web Form", "manage-events", list(settings), as_dict=True)
 

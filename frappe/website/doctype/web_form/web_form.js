@@ -87,6 +87,9 @@ frappe.ui.form.on("Web Form", {
 	},
 
 	add_get_fields_button(frm) {
+		// Nothing to fetch yet when this form owns a not-yet-created DocType.
+		if (frm.doc.is_new_doctype) return;
+
 		frm.add_custom_button(__("Get Fields"), () => {
 			let webform_fieldtypes = frappe.meta
 				.get_field("Web Form Field", "fieldtype")
@@ -131,6 +134,18 @@ frappe.ui.form.on("Web Form", {
 
 	set_fields(frm) {
 		let doc = frm.doc;
+
+		// Fields are authored by hand when this form owns its DocType, instead of
+		// being picked from an existing one, so `fieldname` takes free text and gets
+		// derived from `label` (see the "Web Form Field" `label` handler below).
+		frm.fields_dict.web_form_fields.grid.update_docfield_property(
+			"fieldname",
+			"fieldtype",
+			doc.is_new_doctype ? "Data" : "Select"
+		);
+		frm.refresh_field("web_form_fields");
+
+		if (doc.is_new_doctype) return;
 
 		let as_select_option = (df) => ({
 			label: df.label,
@@ -192,6 +207,10 @@ frappe.ui.form.on("Web Form", {
 	},
 
 	doc_type: function (frm) {
+		frm.trigger("set_fields");
+	},
+
+	is_new_doctype: function (frm) {
 		frm.trigger("set_fields");
 	},
 
@@ -444,8 +463,31 @@ frappe.ui.form.on("Web Form Field", {
 			frm.refresh_field("web_form_fields");
 		}
 	},
+	label: function (frm, doctype, name) {
+		// Only when this form owns its DocType: fieldname is authored, not picked
+		// from an existing one, so derive it from the label like Custom Field does.
+		if (!frm.doc.is_new_doctype) return;
+
+		let doc = frappe.get_doc(doctype, name);
+		if (doc.label && !doc.fieldname) {
+			doc.fieldname = frappe.model.scrub(doc.label);
+			frm.refresh_field("web_form_fields");
+		}
+	},
 	fieldname: function (frm, doctype, name) {
 		let doc = frappe.get_doc(doctype, name);
+
+		if (frm.doc.is_new_doctype) {
+			// Free text here (see `set_fields`), so a value typed directly into
+			// this cell -- instead of derived from `label` -- must still become a
+			// valid column name; scrub() is a no-op if it already is one.
+			if (doc.fieldname) {
+				doc.fieldname = frappe.model.scrub(doc.fieldname);
+				frm.refresh_field("web_form_fields");
+			}
+			return;
+		}
+
 		let df = frappe.meta.get_docfield(frm.doc.doc_type, doc.fieldname);
 		if (!df) return;
 

@@ -11,6 +11,8 @@ from frappe.core.api.file import get_max_file_size
 from frappe.core.doctype.doctype.doctype import HiddenAndMandatoryWithoutDefaultError
 from frappe.core.doctype.file.utils import remove_file_by_url
 from frappe.desk.form.meta import get_code_files_via_hooks
+from frappe.model import no_value_fields
+from frappe.model.naming import append_number_if_name_exists
 from frappe.modules.utils import export_module_json, get_doc_module
 from frappe.permissions import check_doctype_permission
 from frappe.rate_limiter import rate_limit
@@ -56,11 +58,12 @@ class WebForm(WebsiteGenerator):
 		client_script: DF.Code | None
 		condition_json: DF.JSON | None
 		custom_css: DF.Code | None
-		doc_type: DF.Link
+		doc_type: DF.Link | None
 		dynamic_filters_json: DF.JSON | None
 		hide_footer: DF.Check
 		hide_navbar: DF.Check
 		introduction_text: DF.TextEditor | None
+		is_new_doctype: DF.Check
 		is_standard: DF.Check
 		key_required: DF.Check
 		list_columns: DF.Table[WebFormListColumn]
@@ -89,6 +92,9 @@ class WebForm(WebsiteGenerator):
 
 	def validate(self):
 		super().validate()
+
+		if self.is_new_doctype and not frappe.flags.in_import:
+			self.sync_new_doctype()
 
 		if not self.module:
 			self.module = frappe.db.get_value("DocType", self.doc_type, "module")
@@ -126,10 +132,127 @@ class WebForm(WebsiteGenerator):
 					)
 				)
 
+	def sync_new_doctype(self):
+		"""Create or update the DocType this Web Form owns, from `web_form_fields`.
+
+		Only ever called for forms with `is_new_doctype` set, so this never touches a
+		DocType the form doesn't own. The actual schema migration (`ALTER TABLE`) is
+		done by `DocType.on_update` itself via `insert`/`save` below, not reimplemented
+		here.
+		"""
+		fields = self.get_new_doctype_fields()
+
+		if not self.doc_type:
+			self.doc_type = self.create_new_doctype(fields)
+			return
+
+		doctype = frappe.get_doc("DocType", self.doc_type)
+		if self.get_field_signature(doctype.fields) == self.get_field_signature(fields):
+			# fields are unchanged since the DocType was last synced, skip the write
+			return
+
+		doctype.set("fields", fields)
+		doctype.save(ignore_permissions=True)
+
+	def get_new_doctype_fields(self):
+		"""Map `web_form_fields` rows to DocField dicts.
+
+		`Page Break` is a Web Form-only pagination marker (see `add_get_fields_button`
+		and page-break handling in `web_form.js`) with no DocField equivalent, so it's
+		excluded; every other fieldtype offered on `Web Form Field` is already a valid
+		DocField fieldtype.
+		"""
+		fields = []
+		for row in self.web_form_fields:
+			if row.fieldtype == "Page Break":
+				continue
+
+			# Always re-derive, not just when blank: in New DocType mode `fieldname`
+			# is free text (see `web_form.js`), so a user can type a human label like
+			# "Driver Name" straight into it. scrub() is idempotent on an
+			# already-valid fieldname, so this is a no-op for the common case and a
+			# safety net for the "typed a label into fieldname" case, which would
+			# otherwise reach `DocType.insert()` as an invalid column name.
+			row.fieldname = scrub(row.fieldname or row.label or row.fieldtype)
+
+			# Section/Column Break etc. carry no value, so DocType itself rejects
+			# `reqd` on them (`IllegalMandatoryError`) -- a stale `reqd` can linger
+			# on such a row if its fieldtype was changed after the checkbox was set.
+			is_layout_field = row.fieldtype in no_value_fields
+
+			fields.append(
+				{
+					"fieldname": row.fieldname,
+					"label": row.label,
+					"fieldtype": row.fieldtype,
+					"options": row.options,
+					"reqd": 0 if is_layout_field else row.reqd,
+					"read_only": row.read_only,
+					"hidden": row.hidden,
+					"default": row.default,
+					"precision": row.precision,
+					"length": row.max_length,
+					"description": row.description,
+					"placeholder": row.placeholder,
+					"depends_on": row.depends_on,
+					"mandatory_depends_on": row.mandatory_depends_on,
+					"read_only_depends_on": row.read_only_depends_on,
+				}
+			)
+		return fields
+
+	def create_new_doctype(self, fields) -> str:
+		"""Create the DocType this Web Form owns and return its name.
+
+		Grants Desk-side access to System Manager only; the public submit / edit /
+		delete / list flow never relies on DocPerm, it goes through
+		`has_web_form_permission` and saves with `ignore_permissions=True` once that
+		gate passes, exactly as it already does when linking to an existing DocType.
+		"""
+		doctype = frappe.get_doc(
+			{
+				"doctype": "DocType",
+				"name": append_number_if_name_exists("DocType", f"WebForm-{self.title}"),
+				"module": self.module or "Website",
+				"custom": 1,
+				"fields": fields,
+				"permissions": [
+					{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1}
+				],
+			}
+		)
+		doctype.insert(ignore_permissions=True)
+		return doctype.name
+
+	@staticmethod
+	def get_field_signature(fields):
+		"""Comparable snapshot of a field list, for skipping no-op DocType saves.
+
+		Works on both `DocField` documents and plain dicts since both support `.get`.
+		"""
+		keys = (
+			"fieldname",
+			"fieldtype",
+			"label",
+			"options",
+			"reqd",
+			"read_only",
+			"hidden",
+			"default",
+			"precision",
+			"length",
+			"depends_on",
+			"mandatory_depends_on",
+			"read_only_depends_on",
+		)
+		# `or None` normalizes 0 / "" / None as equal: an unset in-memory Web Form
+		# Field row (e.g. `max_length=None`) must compare equal to the same field
+		# after a DB round-trip on the DocType (e.g. `length=0`), or this signature
+		# would never match and every save would re-sync the DocType needlessly.
+		return tuple(tuple(field.get(key) or None for key in keys) for field in fields)
+
 	def validate_fields(self):
 		"""Validate all fields are present"""
-		from frappe.model import no_value_fields
-
 		meta = frappe.get_meta(self.doc_type)
 		missing = [
 			df.fieldname
