@@ -674,6 +674,13 @@ class File(Document):
 			# self.content = None # TODO: This needs to happen; make it happen somehow
 			return self._content
 
+		get_file_content_method = get_hook_method("get_file_content")
+		if get_file_content_method:
+			content = get_file_content_method(self)
+			if content is not None:
+				self._content = content
+				return self._content
+
 		if self.file_url:
 			self.validate_file_url()
 		file_path = self.get_full_path()
