@@ -71,7 +71,8 @@
 		"attach_print": 0,
 		"message": "New user {{ doc.name }} created",
 		"recipients": [
-			{ "receiver_by_document_field": "owner", "cc": "{{ doc.email }}" }
+			{ "receiver_by_document_field": "owner", "cc": "{{ doc.email }}" },
+			{ "receiver_by_email": "extra_recipient@example.com" }
 		]
 	}
 ]

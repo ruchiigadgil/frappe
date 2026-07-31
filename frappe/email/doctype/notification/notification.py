@@ -628,6 +628,8 @@ def get_context(context):
 						email_ids = email_ids_value.replace(",", "\n")
 						recipients = recipients + email_ids.split("\n")
 
+			recipients.extend(get_emails_from_template(recipient.receiver_by_email, context))
+
 			cc.extend(get_emails_from_template(recipient.cc, context))
 			bcc.extend(get_emails_from_template(recipient.bcc, context))
 

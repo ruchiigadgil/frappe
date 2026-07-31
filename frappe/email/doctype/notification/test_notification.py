@@ -450,6 +450,26 @@ class TestNotification(IntegrationTestCase):
 		frappe.db.delete("Email Queue")
 		frappe.db.delete("Email Queue Recipient")
 
+	def test_receiver_by_email(self):
+		frappe.db.delete("User", {"email": "test_receiver_by_email@example.com"})
+		frappe.db.delete("Email Queue")
+		frappe.db.delete("Email Queue Recipient")
+
+		test_user = frappe.new_doc("User")
+		test_user.name = "test_receiver_by_email"
+		test_user.first_name = "test_receiver_by_email"
+		test_user.email = "test_receiver_by_email@example.com"
+
+		test_user.insert(ignore_permissions=True)
+
+		self.assertTrue(
+			frappe.db.get_value("Email Queue Recipient", {"recipient": "extra_recipient@example.com"})
+		)
+
+		frappe.db.delete("User", {"email": "test_receiver_by_email@example.com"})
+		frappe.db.delete("Email Queue")
+		frappe.db.delete("Email Queue Recipient")
+
 	def test_notification_to_assignee(self):
 		todo = frappe.new_doc("ToDo")
 		todo.description = "Test Notification"
