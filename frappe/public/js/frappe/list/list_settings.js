@@ -141,6 +141,12 @@ export default class ListSettings {
 			if (col.df?.fieldname) columnByFieldname[col.df.fieldname] = col;
 		});
 
+		const label_counts = {};
+		me.fields.forEach((field) => {
+			const label = __(field.label, null, me.doctype);
+			label_counts[label] = (label_counts[label] || 0) + 1;
+		});
+
 		for (let idx in me.fields) {
 			if (idx == parseInt(this.max_number_of_fields)) {
 				break;
@@ -148,6 +154,10 @@ export default class ListSettings {
 			let is_sortable = idx == 0 ? `` : `sortable`;
 			let show_sortable_handle = idx == 0 ? `hide` : ``;
 			let can_remove = idx == 0 || is_status_field(me.fields[idx]) ? `hide` : `d-flex`;
+
+			let display_label = __(me.fields[idx].label, null, me.doctype);
+			if (label_counts[display_label] > 1)
+				display_label += ` (${me.fields[idx].fieldname})`;
 
 			fields += `
 				<div class="control-input form-control fields_order ${is_sortable} flex"
@@ -162,7 +172,7 @@ export default class ListSettings {
 						</div>
 
 						<div class="col flex align-items-center px-0">
-							${__(me.fields[idx].label, null, me.doctype)}
+							${display_label}
 						</div>
 
 						<div class="col-2">
@@ -445,10 +455,19 @@ export default class ListSettings {
 	get_doctype_fields(meta, fields) {
 		let multiselect_fields = [];
 
+		const label_counts = {};
 		meta.fields.forEach((field) => {
 			if (!frappe.model.no_value_type.includes(field.fieldtype)) {
+				const label = __(field.label, null, field.doctype);
+				label_counts[label] = (label_counts[label] || 0) + 1;
+			}
+		});
+
+		meta.fields.forEach((field) => {
+			if (!frappe.model.no_value_type.includes(field.fieldtype)) {
+				const label = __(field.label, null, field.doctype);
 				multiselect_fields.push({
-					label: __(field.label, null, field.doctype),
+					label: label_counts[label] > 1 ? `${label} (${field.fieldname})` : label,
 					value: field.fieldname,
 					checked: fields.includes(field.fieldname),
 				});

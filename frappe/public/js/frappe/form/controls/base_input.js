@@ -183,9 +183,12 @@ frappe.ui.form.ControlInput = class ControlInput extends frappe.ui.form.Control 
 		if (this.only_input || this.df.label == this._label) return;
 
 		var icon = "";
+		let display_label = __(this.df.label, null, this.df.parent) || "&nbsp;";
+		const siblings = (this.frm && frappe.get_meta(this.df.parent)?.fields) || [];
+		if (siblings.filter((f) => f.label && f.label === this.df.label && !f.hidden).length > 1)
+			display_label += ` <span class="text-muted">(${this.df.fieldname})</span>`;
 		this.label_span.innerHTML =
-			(icon ? '<i class="' + icon + '"></i> ' : "") +
-				__(this.df.label, null, this.df.parent) || "&nbsp;";
+			(icon ? '<i class="' + icon + '"></i> ' : "") + display_label;
 		this.show_description_on_click();
 		this._label = this.df.label;
 	}
