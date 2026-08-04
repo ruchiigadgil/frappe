@@ -2,6 +2,7 @@
 # License: MIT. See LICENSE
 import datetime
 import json
+import re
 import threading
 
 import frappe
@@ -16,6 +17,8 @@ from frappe.modules.export_file import export_to_files
 from frappe.utils import cint, cstr
 from frappe.utils.safe_exec import check_safe_sql_query, safe_exec
 from frappe.utils.xlsxutils import XLSXMetadata
+
+SQL_PLACEHOLDER_PATTERN = re.compile(r"%\((\w+)\)s")
 
 
 class Report(Document):
@@ -182,6 +185,10 @@ class Report(Document):
 			frappe.throw(_("Must specify a Query to run"), title=_("Report Document Error"))
 
 		check_safe_sql_query(self.query)
+
+		filters = frappe._dict(filters or {})
+		for fieldname in SQL_PLACEHOLDER_PATTERN.findall(self.query):
+			filters.setdefault(fieldname, None)
 
 		frappe.db.begin(read_only=True)
 		result = [list(t) for t in frappe.db.sql(self.query, filters)]
