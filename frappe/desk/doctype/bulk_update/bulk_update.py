@@ -144,6 +144,19 @@ def _bulk_action(doctype, docnames, action, data, task_id=None):
 			failed.append(docname)
 			frappe.db.rollback()
 
+	summary = {
+		"submit": _("{0} of {1} documents submitted."),
+		"cancel": _("{0} of {1} documents cancelled."),
+		"update": _("{0} of {1} documents updated."),
+	}.get(action, _("{0} of {1} documents processed."))
+
+	frappe.msgprint(
+		summary.format(num_documents - len(failed), num_documents),
+		alert=True,
+		indicator="orange" if failed else "green",
+		realtime=True,
+	)
+
 	return failed
 
 

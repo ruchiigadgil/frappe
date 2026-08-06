@@ -26,12 +26,6 @@ frappe.ui.form.on("Bulk Update", {
 								failed.map((f) => (f.bold ? f.bold() : f)).join(", "),
 							])
 						);
-					} else {
-						frappe.msgprint({
-							title: __("Success"),
-							message: __("Updated Successfully"),
-							indicator: "green",
-						});
 					}
 
 					frappe.hide_progress();
