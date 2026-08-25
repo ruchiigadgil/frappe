@@ -3,6 +3,8 @@
 
 import base64
 import os
+from email import policy
+from email.parser import Parser
 
 import frappe
 from frappe import safe_decode
@@ -308,6 +310,36 @@ To: =?iso-8859-1?Q?X=E9Y=40example=2Ecom?= <xy@example.com>, "fail@example.com" 
 			'XéY@example.com <xy@example.com>, "fail@example.com" <success@example.com>',
 		)
 		frappe.db.rollback()
+
+	def test_headers_are_folded_within_smtp_line_length_limit(self):
+		"""RFC 5321 sec 4.5.3.1 caps a line at 998 octets, and strict MTAs reject longer
+		ones with "501 Syntax error - line too long". Long headers must therefore be folded."""
+		cc = [f"recipient.number.{i:03d}@somecompanydomain.example.com" for i in range(40)]
+		subject = "Quarterly Revenue Summary " * 60
+
+		message = get_email(
+			recipients=["test@example.com"],
+			sender="me@example.com",
+			subject=subject,
+			content="<p>test</p>",
+			cc=cc,
+		).as_string()
+
+		for line in message.split("\n"):
+			self.assertLessEqual(
+				len(line.rstrip("\r").encode()),
+				998,
+				f"line exceeds the RFC 5321 limit: {line[:80]}...",
+			)
+
+		# folding must not alter what the headers mean
+		parsed = Parser(policy=policy.SMTP).parsestr(message)
+		self.assertEqual([addr.addr_spec for addr in parsed["CC"].addresses], cc)
+		self.assertEqual(str(parsed["Subject"]), subject.strip())
+
+		# the Email Queue substitutes this placeholder by plain string replacement on the
+		# serialised message, so folding must leave it on a single line
+		self.assertIn("To: <!--recipient-->", message)
 
 
 def fixed_column_width(string, chunk_size):

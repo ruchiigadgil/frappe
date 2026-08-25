@@ -400,7 +400,11 @@ class EMail:
 		"""validate, build message and convert to string"""
 		self.validate()
 		self.make()
-		return self.msg_root.as_string(policy=policy.SMTP)
+		# maxheaderlen=None preserves max_line_length from the policy. Message.as_string
+		# defaults it to 0, which Generator.flatten clones onto the policy as "unlimited",
+		# disabling header folding and emitting lines longer than the 998 octet limit of
+		# RFC 5321 section 4.5.3.1, which strict MTAs reject with 501 line too long.
+		return self.msg_root.as_string(maxheaderlen=None, policy=policy.SMTP)
 
 
 def get_formatted_html(
