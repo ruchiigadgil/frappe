@@ -135,8 +135,8 @@ class AutoEmailReport(Document):
 				title=_("Missing Filters Required"),
 				msg=_("Following Report Filters have missing values:")
 				+ "<br><br><ul><li>"
-				+ " <li>".join(throw_list)
-				+ "</ul>",
+				+ "</li><li>".join(throw_list)
+				+ "</li></ul>",
 			)
 
 	def get_report_content(self):
