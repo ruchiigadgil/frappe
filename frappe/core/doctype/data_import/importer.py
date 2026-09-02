@@ -1475,6 +1475,12 @@ def sort_tree_payloads(payloads: list, doctype: str, import_type: str | None) ->
 
 	payload_keys = []
 	for payload in payloads:
+		if payload.doc is None:
+			# Rows that parsed to no doc (all columns blank/invalid) can't be tree-sorted;
+			# let them pass through in their original position, same as everywhere else
+			# in this file that tolerates a None doc.
+			payload_keys.append((payload, None, None))
+			continue
 		node_id = _get_tree_node_key(payload.doc, id_fieldname, alias_field)
 		parent = payload.doc.get(parent_field)
 		parent = cstr(parent).strip() if parent not in INVALID_VALUES else None
