@@ -1674,10 +1674,8 @@ export default class Grid {
 						restrictions: {
 							allowed_file_types: [".csv"],
 						},
-						on_success(file) {
-							const data = frappe.utils.csv_to_array(
-								frappe.utils.get_decoded_string(file.dataurl)
-							);
+						async on_success(file) {
+							const data = frappe.utils.csv_to_array(await read_csv(file));
 							if (cint(data.length) - BULK_EDIT_CSV_HEADER_ROWS > 5000) {
 								frappe.throw(__("Cannot import table with more than 5000 rows."));
 							}
@@ -1815,4 +1813,14 @@ export default class Grid {
 		}
 		return current_row;
 	}
+}
+
+async function read_csv(file) {
+	if (file.dataurl) return frappe.utils.get_decoded_string(file.dataurl);
+
+	const response = await fetch(file.file_url);
+	if (!response.ok) {
+		frappe.throw(__("Could not find {0}", [file.file_name || file.file_url]));
+	}
+	return response.text();
 }
