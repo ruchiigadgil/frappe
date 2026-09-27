@@ -132,7 +132,7 @@ DOCTYPE_TABLE_FIELDS = [
 
 TABLE_DOCTYPES_FOR_DOCTYPE = MappingProxyType({df["fieldname"]: df["options"] for df in DOCTYPE_TABLE_FIELDS})
 
-# child tables cannot have child tables
+# child tables of DocType itself cannot have child tables
 TABLE_DOCTYPES_FOR_CHILD_TABLES = MappingProxyType({})
 
 DOCTYPES_FOR_DOCTYPE = {"DocType", *TABLE_DOCTYPES_FOR_DOCTYPE.values()}
@@ -1794,9 +1794,10 @@ class Document(_DocumentBase):
 
 	def set_parent_in_children(self):
 		"""Updates `parent` and `parenttype` property in all children."""
-		for d in self.get_all_children():
+		for d in self.get_direct_children():
 			d.parent = self.name
 			d.parenttype = self.doctype
+			d.set_parent_in_children()
 
 	def set_name_in_children(self):
 		# Set name for any new children
@@ -1810,7 +1811,7 @@ class Document(_DocumentBase):
 
 		self._validate_update_after_submit()
 		for d in self.get_all_children():
-			if d.is_new() and self.meta.get_field(d.parentfield).allow_on_submit:
+			if d.is_new() and d.parent_doc.meta.get_field(d.parentfield).allow_on_submit:
 				# in case of a new row, don't validate allow on submit, if table is allow on submit
 				continue
 
@@ -1992,17 +1993,25 @@ class Document(_DocumentBase):
 
 	def get_all_children(self, parenttype=None, *, include_computed=False) -> list["Document"]:
 		"""
-		Return all child documents from **Table** type fields in a list.
+		Return all child documents from **Table** type fields in a list, at every depth.
 		Excludes computed tables by default, unless `include_computed` is set to True.
 		"""
 
 		children = []
+		for child in self.get_direct_children(include_computed=include_computed):
+			if not parenttype or child.doctype == parenttype:
+				children.append(child)
+
+			children.extend(child.get_all_children(parenttype, include_computed=include_computed))
+
+		return children
+
+	def get_direct_children(self, *, include_computed=False) -> list["Document"]:
+		"""Return child documents from this document's own **Table** type fields in a list."""
 		table_fieldnames = self._table_fieldnames if include_computed else self._non_computed_table_fieldnames
 
-		for fieldname, child_doctype in table_fieldnames.items():
-			if parenttype and child_doctype != parenttype:
-				continue
-
+		children = []
+		for fieldname in table_fieldnames:
 			if value := self.get(fieldname):
 				children.extend(value)
 
@@ -2991,8 +3000,6 @@ class Document(_DocumentBase):
 			value["doctype"] = doctype
 			controller = get_controller(doctype)
 			child = controller.__new__(controller)
-			child._table_fieldnames = TABLE_DOCTYPES_FOR_CHILD_TABLES
-			child._non_computed_table_fieldnames = TABLE_DOCTYPES_FOR_CHILD_TABLES
 			child.__init__(value)
 
 		__dict = child.__dict__

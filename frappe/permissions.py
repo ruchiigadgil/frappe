@@ -859,7 +859,7 @@ def has_child_permission(
 
 	parent_meta = frappe.get_meta(parent_doctype)
 
-	if parent_meta.istable or not (
+	if (parent_meta.istable and not child_doc) or not (
 		valid_parentfields := [
 			df.fieldname
 			for df in parent_meta.get_table_fields(include_computed=True)
@@ -894,6 +894,7 @@ def has_child_permission(
 			)
 			return False
 
+		# TODO(human): when parent_meta.istable, it has no permissions of its own
 		permlevel = parent_meta.get_field(parentfield).permlevel
 		# checking for select == checking for "select or read"
 		# select does not support access of higher permlevel child tables, but read does
@@ -914,6 +915,16 @@ def has_child_permission(
 			parent_doc = child_doc.parent
 	else:
 		parent_doc = None
+
+	if parent_meta.istable:
+		return has_child_permission(
+			parent_doctype,
+			ptype=ptype,
+			child_doc=parent_doc,
+			user=user,
+			debug=debug,
+			print_logs=print_logs,
+		)
 
 	return has_permission(
 		parent_doctype,
