@@ -29,14 +29,16 @@
 
 {%- macro render_table(df, doc) -%}
 	{%- set table_meta = frappe.get_meta(df.options) -%}
-	{%- set data = doc.get(df.fieldname)[df.start:df.end] -%}
+	{%- set data = doc.get(df.fieldname)[df.get("start"):df.get("end")] -%}
 	{%- if doc.print_templates and
 			doc.print_templates.get(df.fieldname) -%}
 		{% include doc.print_templates[df.fieldname] %}
 	{%- else -%}
 		{%- if data -%}
-		{%- set visible_columns = get_visible_columns(doc.get(df.fieldname),
+		{%- set all_columns = get_visible_columns(doc.get(df.fieldname),
 			table_meta, df) -%}
+		{%- set visible_columns = all_columns|rejectattr("fieldtype", "equalto", "Table")|list -%}
+		{%- set nested_tables = all_columns|selectattr("fieldtype", "equalto", "Table")|list -%}
 		<div {{ fieldmeta(df) }}>
 			<table class="table table-bordered table-condensed">
 				<thead>
@@ -62,6 +64,12 @@
 							{% endif %}
 						{% endfor %}
 					</tr>
+					{% for nested_df in nested_tables if d.get(nested_df.fieldname) %}
+					<tr>
+						<td class="table-sr"></td>
+						<td colspan="{{ visible_columns|length }}">{{ render_table(nested_df, d) }}</td>
+					</tr>
+					{% endfor %}
 					{% endfor %}
 				</tbody>
 			</table>

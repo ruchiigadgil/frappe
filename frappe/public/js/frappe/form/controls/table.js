@@ -77,10 +77,10 @@ frappe.ui.form.ControlTable = class ControlTable extends frappe.ui.form.Control 
 			let row_idx = locals[doctype][row_docname].idx;
 			let data_length = data.length;
 			const total_rows_needed = row_idx - 1 + data.length;
-			while (this.frm.doc[table_field].length < total_rows_needed) {
-				const before = this.frm.doc[table_field].length;
+			while (this.grid.parent_doc[table_field].length < total_rows_needed) {
+				const before = this.grid.parent_doc[table_field].length;
 				this.grid.add_new_row();
-				if (this.frm.doc[table_field].length === before) break; // cannot_add_rows
+				if (this.grid.parent_doc[table_field].length === before) break; // cannot_add_rows
 			}
 			for (let i = 0; i < data_length; i++) {
 				const row = data[i];
@@ -89,7 +89,7 @@ frappe.ui.form.ControlTable = class ControlTable extends frappe.ui.form.Control 
 					continue;
 				}
 
-				const doc = this.frm.doc[table_field][row_idx - 1];
+				const doc = this.grid.parent_doc[table_field][row_idx - 1];
 				if (doc) {
 					let row_values = {};
 					row.forEach((value, data_index) => {

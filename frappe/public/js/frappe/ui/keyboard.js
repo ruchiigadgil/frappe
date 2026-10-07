@@ -353,10 +353,9 @@ function handle_escape_key(e) {
 }
 
 function close_grid_and_dialog() {
-	// close open grid row
-	var open_row = $(".grid-row-open");
-	if (open_row.length) {
-		var grid_row = open_row.data("grid_row");
+	// close the innermost open grid row
+	const grid_row = frappe.ui.form?.get_open_grid_form?.();
+	if (grid_row) {
 		grid_row.toggle_view(false);
 		return false;
 	}

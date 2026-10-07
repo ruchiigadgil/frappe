@@ -134,20 +134,19 @@ Object.assign(frappe.model, {
 
 		let meta = frappe.get_meta(doc.doctype);
 		let is_table = meta ? meta.istable : doc.parentfield;
-		// add child docs to locals
-		if (!is_table) {
-			for (var i in doc) {
-				if (i.startsWith("__")) continue;
-				var value = doc[i];
+		// add child docs to locals; a child row only holds rows in its own table fields
+		const child_keys = is_table
+			? frappe.meta.get_table_fields(doc.doctype, true).map((df) => df.fieldname)
+			: Object.keys(doc);
+		for (const key of child_keys) {
+			if (key.startsWith("__")) continue;
+			const value = doc[key];
 
-				if ($.isArray(value)) {
-					for (var x = 0, y = value.length; x < y; x++) {
-						var d = value[x];
+			if ($.isArray(value)) {
+				for (const d of value) {
+					if (typeof d == "object" && !d.parent) d.parent = doc.name;
 
-						if (typeof d == "object" && !d.parent) d.parent = doc.name;
-
-						frappe.model.add_to_locals(d);
-					}
+					frappe.model.add_to_locals(d);
 				}
 			}
 		}
@@ -160,6 +159,15 @@ Object.assign(frappe.model, {
 			Object.keys(target).map((key) => {
 				if (source[key] == undefined) delete target[key];
 			});
+		};
+		// rows with tables of their own are merged like the parent, so their rows keep their identity
+		let merge_row = function (local_row, updated_row) {
+			if (frappe.meta.get_table_fields(updated_row.doctype, true).length) {
+				frappe.model.update_in_locals(updated_row);
+			} else {
+				Object.assign(local_row, updated_row);
+				clear_keys(updated_row, local_row);
+			}
 		};
 
 		for (let fieldname in updated_doc) {
@@ -184,8 +192,7 @@ Object.assign(frappe.model, {
 						: null;
 					if (local_child_doc) {
 						// update the existing child doc in locals
-						Object.assign(local_child_doc, updated_child_doc);
-						clear_keys(updated_child_doc, local_child_doc);
+						merge_row(local_child_doc, updated_child_doc);
 						// update parent array reference if needed
 						if (local_child_doc_in_parent !== local_child_doc) {
 							local_parent_doc[fieldname][i] = local_child_doc;
@@ -228,8 +235,7 @@ Object.assign(frappe.model, {
 						}
 
 						// row exists, just copy the values
-						Object.assign(local_child_doc_in_parent, updated_child_doc);
-						clear_keys(updated_child_doc, local_child_doc_in_parent);
+						merge_row(local_child_doc_in_parent, updated_child_doc);
 					} else {
 						// row at this position is needed at a different index
 						// (or no row here) — create a fresh local entry

@@ -163,6 +163,21 @@ $.extend(frappe.meta, {
 		});
 	},
 
+	get_descendant_doctypes: function (doctype) {
+		// every child DocType below `doctype`, at any depth, nearest first
+		const found = [];
+		const pending = [doctype];
+		while (pending.length) {
+			for (const df of frappe.meta.get_table_fields(pending.shift(), true)) {
+				if (!found.includes(df.options)) {
+					found.push(df.options);
+					pending.push(df.options);
+				}
+			}
+		}
+		return found;
+	},
+
 	get_doctype_for_field: function (doctype, key) {
 		var out = null;
 		if (frappe.model.std_fields_list.includes(key)) {

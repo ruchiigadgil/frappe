@@ -378,21 +378,10 @@ def attach_files_to_document(doc: "Document", event) -> None:
 		if doc.has_value_changed(df.fieldname):
 			candidates.append((df, doc.get(df.fieldname)))
 
-	table_fields = doc.meta.get("fields", {"fieldtype": "Table"})
-	for table_df in table_fields:
-		child_rows = doc.get(table_df.fieldname) or []
-		if not child_rows:
-			continue
-
-		child_meta = frappe.get_meta(table_df.options)
-		child_attach_fields = child_meta.get("fields", {"fieldtype": ["in", ["Attach", "Attach Image"]]})
-		if not child_attach_fields:
-			continue
-
-		for child_row in child_rows:
-			for child_df in child_attach_fields:
-				if child_row.has_value_changed(child_df.fieldname):
-					candidates.append((child_df, child_row.get(child_df.fieldname)))
+	for child_row in doc.get_all_children():
+		for child_df in child_row.meta.get("fields", {"fieldtype": ["in", ["Attach", "Attach Image"]]}):
+			if child_row.has_value_changed(child_df.fieldname):
+				candidates.append((child_df, child_row.get(child_df.fieldname)))
 
 	_attach_field_values(doc, candidates)
 
@@ -513,27 +502,14 @@ def relink_mismatched_files(doc: "Document") -> None:
 			relink_files(doc, df.fieldname, doc.__temporary_name)
 
 	# Relink files in child table Attach fields
-	table_fields = doc.meta.get("fields", {"fieldtype": "Table"})
-	for table_df in table_fields:
-		child_rows = doc.get(table_df.fieldname) or []
-		if not child_rows:
-			continue
-
-		child_meta = frappe.get_meta(table_df.options)
-		child_attach_fields = child_meta.get("fields", {"fieldtype": ["in", ["Attach", "Attach Image"]]})
-
-		if not child_attach_fields:
-			continue
-
-		for child_row in child_rows:
-			for child_df in child_attach_fields:
-				file_url = child_row.get(child_df.fieldname)
-				if file_url:
-					frappe.db.set_value(
-						"File",
-						{"file_url": file_url, "attached_to_name": doc.__temporary_name},
-						{"attached_to_name": doc.name},
-					)
+	for child_row in doc.get_all_children():
+		for child_df in child_row.meta.get("fields", {"fieldtype": ["in", ["Attach", "Attach Image"]]}):
+			if file_url := child_row.get(child_df.fieldname):
+				frappe.db.set_value(
+					"File",
+					{"file_url": file_url, "attached_to_name": doc.__temporary_name},
+					{"attached_to_name": doc.name},
+				)
 	# delete temporary name after relinking is done
 	doc.delete_key("__temporary_name")
 

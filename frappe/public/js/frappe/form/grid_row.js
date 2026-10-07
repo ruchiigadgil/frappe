@@ -837,7 +837,7 @@ export default class GridRow {
 
 		if (!doc) return;
 
-		let parent = this.frm ? this.frm.doc : this.doc || null;
+		let parent = this.frm ? this.grid.parent_doc : this.doc || null;
 
 		if (typeof expression === "boolean") {
 			out = expression;
@@ -1383,8 +1383,11 @@ export default class GridRow {
 			this.doc = locals[this.doc.doctype][this.doc.name];
 		}
 
-		// hide other
+		// hide other, unless this row opens inside the open row's form
 		var open_row = this.get_open_form();
+		if (open_row && open_row !== this && open_row.wrapper[0].contains(this.wrapper[0])) {
+			open_row = null;
+		}
 
 		if (show === undefined) show = !open_row;
 
@@ -1452,6 +1455,7 @@ export default class GridRow {
 		}
 	}
 	hide_form() {
+		this.wrapper.find(".grid-row-open").each((_, row) => $(row).data("grid_row")?.hide_form());
 		if (frappe.utils.is_xs()) {
 			$(this.grid.form_grid).css("min-width", "738px");
 			$(this.grid.form_grid).css("position", "relative");

@@ -614,9 +614,10 @@ def get_child_table_changes(
 		for table_fieldname, _row in data.get(key, []):
 			counts[table_fieldname] = counts.get(table_fieldname, 0) + 1
 		for table_fieldname, count in counts.items():
-			df = is_field_visible(meta, permitted, table_fieldname)
-			if not df:
+			table = get_visible_table(meta, permitted, table_fieldname, doctype, child_cache)
+			if not table:
 				continue
+			df = table[0]
 			changes.append(
 				format_phrase_change(
 					template.format(count, _(df.label or table_fieldname)), fieldname=table_fieldname
@@ -626,15 +627,10 @@ def get_child_table_changes(
 	for entry in data.get("row_changed", []):
 		# get_diff order is (table_fieldname, row_index, row_name, changes); version.py docstring is wrong
 		table_fieldname, row_index, _row_name, child_changes = entry
-		df = is_field_visible(meta, permitted, table_fieldname)
-		if not df:
+		table = get_visible_table(meta, permitted, table_fieldname, doctype, child_cache)
+		if not table:
 			continue
-
-		child_dt = df.options
-		if child_dt not in child_cache:
-			child_meta = frappe.get_meta(child_dt)
-			child_cache[child_dt] = (readable_permlevels(child_meta, parenttype=doctype), child_meta)
-		child_permitted, child_meta = child_cache[child_dt]
+		_df, child_meta, child_permitted = table
 
 		for cfield, _cold, cnew in child_changes:
 			cdf = is_field_visible(child_meta, child_permitted, cfield)
@@ -652,6 +648,21 @@ def get_child_table_changes(
 			)
 
 	return changes
+
+
+def get_visible_table(meta, permitted: set | None, path: str, doctype: str, child_cache: dict):
+	"""The table docfield at `path` (`items`, or nested `items.serials`), with the meta and readable
+	permlevels of its rows; None if any table on the path is hidden from the user."""
+	df = None
+	for fieldname in path.split("."):
+		df = is_field_visible(meta, permitted, fieldname)
+		if not df:
+			return None
+		if df.options not in child_cache:
+			child_meta = frappe.get_meta(df.options)
+			child_cache[df.options] = (readable_permlevels(child_meta, parenttype=doctype), child_meta)
+		permitted, meta = child_cache[df.options]
+	return df, meta, permitted
 
 
 def readable_permlevels(meta, parenttype: str | None = None) -> set[int] | None:

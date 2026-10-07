@@ -875,13 +875,22 @@ $.extend(frappe.model, {
 		var all = [doc];
 		for (var key in doc) {
 			if ($.isArray(doc[key]) && !key.startsWith("_")) {
-				var children = doc[key];
-				for (var i = 0, l = children.length; i < l; i++) {
-					all.push(children[i]);
+				for (const child of doc[key]) {
+					all.push(
+						...($.isPlainObject(child) ? frappe.model.get_all_docs(child) : [child])
+					);
 				}
 			}
 		}
 		return all;
+	},
+
+	get_root_doc: function (doc) {
+		// climb from a child row to the document at the top of its tree
+		while (doc && doc.parenttype) {
+			doc = locals[doc.parenttype]?.[doc.parent];
+		}
+		return doc;
 	},
 
 	get_full_column_name: function (fieldname, doctype) {

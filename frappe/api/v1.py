@@ -5,6 +5,7 @@ import frappe.client
 from frappe import _
 from frappe.database.utils import DefaultOrderBy
 from frappe.handler import is_valid_http_method
+from frappe.model.nested_children import load_with_root
 from frappe.utils import attach_expanded_links
 from frappe.utils.data import sbool
 
@@ -63,7 +64,7 @@ def update_doc(doctype: str, name: str):
 
 	# check for child table doctype
 	if doc.get("parenttype"):
-		frappe.get_doc(doc.parenttype, doc.parent).save()
+		load_with_root(doc.doctype, doc.name)[0].save()
 
 	return doc.copy_with_fieldlevel_read_permissions()
 

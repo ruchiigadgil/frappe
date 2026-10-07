@@ -9,6 +9,7 @@ import frappe.utils
 from frappe import _
 from frappe.desk.reportview import validate_args
 from frappe.desk.search import PAGE_LENGTH_FOR_LINK_VALIDATION, search_widget
+from frappe.model.nested_children import load_with_root
 from frappe.utils import attach_expanded_links, get_safe_filters
 from frappe.utils.caching import http_cache
 
@@ -210,16 +211,8 @@ def set_value(doctype: str, name: str | int, fieldname: str | dict[str, Any], va
 
 	values = editable
 
-	# check for child table doctype
-	if not frappe.get_meta(doctype).istable:
-		doc = frappe.get_doc(doctype, name)
-		doc.update(values)
-	else:
-		doc = frappe.db.get_value(doctype, name, ["parenttype", "parent"], as_dict=True)
-		doc = frappe.get_doc(doc.parenttype, doc.parent)
-		child = doc.getone({"doctype": doctype, "name": name})
-		child.update(values)
-
+	doc, row = load_with_root(doctype, name)
+	row.update(values)
 	doc.save()
 
 	return doc.copy_with_fieldlevel_read_permissions().as_dict()
@@ -541,10 +534,10 @@ def insert_doc(doc) -> "Document":
 			frappe.throw(_("Parenttype, Parent and Parentfield are required to insert a child record"))
 
 		# inserting a child record
-		parent = frappe.get_doc(doc.parenttype, doc.parent)
+		root, parent = load_with_root(doc.parenttype, doc.parent)
 		parent.append(doc.parentfield, doc)
-		parent.save()
-		return parent
+		root.save()
+		return root
 
 	return frappe.get_doc(doc).insert()
 
@@ -556,20 +549,12 @@ def delete_doc(doctype, name):
 	"""
 
 	if frappe.is_table(doctype):
-		values = frappe.db.get_value(doctype, name, ["parenttype", "parent", "parentfield"])
-		if not values:
+		root, row = load_with_root(doctype, name)
+		if not root.has_permission("write"):
 			raise frappe.DoesNotExistError(doctype=doctype)
 
-		assert len(values) == 3, "expected parenttype, parent and parentfield for child table row"
-		parenttype, parent, parentfield = values
-		parent = frappe.get_doc(parenttype, parent)
-		if not parent.has_permission("write"):
-			raise frappe.DoesNotExistError(doctype=doctype)
-
-		for row in parent.get(parentfield):
-			if row.name == name:
-				parent.remove(row)
-				parent.save()
-				break
+		if row:
+			row.parent_doc.remove(row)
+			root.save()
 	else:
 		frappe.delete_doc(doctype, name, ignore_missing=False)

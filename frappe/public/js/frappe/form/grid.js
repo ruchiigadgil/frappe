@@ -34,11 +34,13 @@ export const LEGACY_COLSIZE_TO_PX = {
 };
 
 frappe.ui.form.get_open_grid_form = function () {
-	return $(".grid-row-open").data("grid_row");
+	// rows open inside another row's form come later in the page, so the last one is the innermost
+	return $(".grid-row-open").last().data("grid_row");
 };
 
 frappe.ui.form.close_grid_form = function () {
-	const open_form = frappe.ui.form.get_open_grid_form();
+	// closing the outermost open row also closes the rows open inside it
+	const open_form = $(".grid-row-open").first().data("grid_row");
 	open_form && open_form.hide_form();
 
 	// hide editable row too
@@ -415,7 +417,7 @@ export default class Grid {
 		const num_rows = this.data.length;
 		frappe.confirm(__("Are you sure you want to delete all {0} rows?", [num_rows]), () => {
 			if (this.frm) {
-				this.frm.doc[this.df.fieldname] = [];
+				this.parent_doc[this.df.fieldname] = [];
 			} else {
 				this.df.data = [];
 			}
@@ -863,7 +865,7 @@ export default class Grid {
 		if (this.frm && this.frm.docname) {
 			// use doc specific docfield object
 			this.df = frappe.meta.get_docfield(
-				this.frm.doctype,
+				this.parent_doc.doctype,
 				this.df.fieldname,
 				this.frm.docname
 			);
@@ -1012,20 +1014,26 @@ export default class Grid {
 		this.frm && $(this.frm.wrapper).trigger("grid-make-sortable", [this.frm]);
 	}
 
+	// the document that owns this table: the form's doc, or the row whose form holds this grid
+	get parent_doc() {
+		const doc = this.control?.doc;
+		return doc && this.frm && doc.doctype !== this.frm.doctype ? doc : this.frm?.doc;
+	}
+
 	get_data(filter_field) {
 		let data = [];
 		if (filter_field) {
 			data = this.get_filtered_data();
 		} else {
 			data = this.frm
-				? this.frm.doc[this.df.fieldname] || []
+				? this.parent_doc[this.df.fieldname] || []
 				: this.df.data || this.get_modal_data();
 		}
 		return data;
 	}
 
 	get_filtered_data() {
-		let all_data = this.frm ? this.frm.doc[this.df.fieldname] : this.df.data;
+		let all_data = this.frm ? this.parent_doc[this.df.fieldname] : this.df.data;
 
 		if (!all_data) return;
 
@@ -1251,7 +1259,7 @@ export default class Grid {
 
 			if (this.frm) {
 				var d = frappe.model.add_child(
-					this.frm.doc,
+					this.parent_doc,
 					this.df.options,
 					this.df.fieldname,
 					idx
@@ -1311,7 +1319,7 @@ export default class Grid {
 			d.idx = index + 1;
 			$item.attr("data-idx", d.idx);
 
-			if (this.frm) this.frm.doc[this.df.fieldname][index] = d;
+			if (this.frm) this.parent_doc[this.df.fieldname][index] = d;
 			this.data[index] = d;
 			this.grid_rows[index] = this.grid_rows_by_docname[d.name];
 		});
@@ -1670,7 +1678,7 @@ export default class Grid {
 	}
 
 	setup_allow_bulk_edit() {
-		if (!this.frm || !this.frm.get_docfield(this.df.fieldname)?.allow_bulk_edit) return;
+		if (!this.frm || !this.get_table_docfield()?.allow_bulk_edit) return;
 
 		this.setup_bulk_edit_button(".grid-upload", () =>
 			new frappe.ui.form.GridImport(this).show()
@@ -1693,6 +1701,25 @@ export default class Grid {
 				});
 				return false;
 			});
+	}
+
+	get_table_docfield() {
+		return frappe.meta.get_docfield(
+			this.parent_doc.doctype,
+			this.df.fieldname,
+			this.frm.docname
+		);
+	}
+
+	// dotted path from the form's document down to this table, e.g. "items.serials"
+	get table_path() {
+		const path = [this.df.fieldname];
+		let doc = this.parent_doc;
+		while (doc?.parentfield) {
+			path.unshift(doc.parentfield);
+			doc = frappe.get_doc(doc.parenttype, doc.parent);
+		}
+		return path.join(".");
 	}
 
 	add_custom_button(label, click, position = "bottom") {

@@ -86,7 +86,9 @@ export default class GridImport {
 	}
 
 	get_rows_by_id() {
-		return new Map((this.grid.frm.doc[this.grid.df.fieldname] || []).map((d) => [d.name, d]));
+		return new Map(
+			(this.grid.parent_doc[this.grid.df.fieldname] || []).map((d) => [d.name, d])
+		);
 	}
 
 	get_field_label(fieldname) {
@@ -138,6 +140,7 @@ export default class GridImport {
 			title: this.step_title(TAB_UPLOAD),
 			size: "large",
 			centered: true,
+			keep_grid_form_open: true,
 		});
 		$(this.dialog.wrapper).addClass("grid-import-dialog");
 		this.dialog.$body.addClass("grid-import-body");
@@ -876,7 +879,7 @@ export default class GridImport {
 				false,
 				{ fields: this.get_docfields() },
 				{
-					rows: this.grid.frm.doc[this.grid.df.fieldname] || [],
+					rows: this.grid.parent_doc[this.grid.df.fieldname] || [],
 					download: (values, fieldnames) => this.download_template(values, fieldnames),
 				}
 			);
@@ -884,7 +887,7 @@ export default class GridImport {
 	}
 
 	get_template_rows(export_records) {
-		const rows = this.grid.frm.doc[this.grid.df.fieldname] || [];
+		const rows = this.grid.parent_doc[this.grid.df.fieldname] || [];
 		if (export_records === BLANK_TEMPLATE) return [];
 		return export_records === FIVE_RECORDS ? rows.slice(0, 5) : rows;
 	}
@@ -1239,7 +1242,7 @@ export default class GridImport {
 		const warnings = await frappe.xcall("frappe.desk.form.grid_import.validate_rows", {
 			doctype: this.grid.frm.doctype,
 			docname: this.grid.frm.docname,
-			fieldname: this.grid.df.fieldname,
+			fieldname: this.grid.table_path,
 			headers: JSON.stringify(headers),
 			rows: JSON.stringify(indexes.map((r) => rows[r])),
 			column_map: JSON.stringify(column_map),
@@ -1262,7 +1265,7 @@ export default class GridImport {
 		const map = await frappe.xcall("frappe.desk.form.grid_import.get_column_map", {
 			doctype: this.grid.frm.doctype,
 			docname: this.grid.frm.docname,
-			fieldname: this.grid.df.fieldname,
+			fieldname: this.grid.table_path,
 			headers: JSON.stringify(headers),
 		});
 		const mappable = this.mappable_fieldnames();
@@ -1294,7 +1297,11 @@ export default class GridImport {
 
 			if (!target) {
 				if (import_type === UPDATE) return;
-				target = this.grid.frm.add_child(this.grid.df.fieldname);
+				target = frappe.model.add_child(
+					this.grid.parent_doc,
+					this.grid.df.options,
+					this.grid.df.fieldname
+				);
 			}
 
 			fields.forEach(({ i, df }) => {
@@ -1302,10 +1309,18 @@ export default class GridImport {
 			});
 		});
 
-		this.grid.frm.refresh_field(this.grid.df.fieldname);
+		this.refresh_table();
 		frappe.ui.toast({ message: apply_summary(import_type, counts), type: "success" });
 
 		this.grid.frm.dirty();
+	}
+
+	refresh_table() {
+		if (this.grid.parent_doc === this.grid.frm.doc) {
+			this.grid.frm.refresh_field(this.grid.df.fieldname);
+		} else {
+			this.grid.refresh();
+		}
 	}
 }
 

@@ -134,6 +134,29 @@ frappe.ui.form.check_mandatory = function (frm) {
 	const parent_errors = [];
 	const table_errors = {};
 
+	// errors are grouped per table of each parent row, so nested rows are told apart
+	const new_table_errors = function (doc) {
+		const table_label = (row) => {
+			const table_field = frappe.meta.docfield_map[row.parenttype][row.parentfield];
+			return __(table_field.label || frappe.unscrub(table_field.fieldname));
+		};
+		const parent = locals[doc.parenttype]?.[doc.parent];
+		const label = parent?.parenttype
+			? __("{0} in {1} row {2}", [table_label(doc), table_label(parent), parent.idx])
+			: table_label(doc);
+		return {
+			label: label.bold(),
+			fields: {},
+			total_rows: (parent?.[doc.parentfield] || []).length,
+		};
+	};
+	const top_level_parentfield = function (doc) {
+		while (locals[doc.parenttype]?.[doc.parent]?.parenttype) {
+			doc = locals[doc.parenttype][doc.parent];
+		}
+		return doc.parentfield;
+	};
+
 	$.each(frappe.model.get_all_docs(frm.doc), function (i, doc) {
 		var error_fields = [];
 		var folded = false;
@@ -161,7 +184,7 @@ frappe.ui.form.check_mandatory = function (frm) {
 					error_fields[error_fields.length] = __(df.label, null, df.parent);
 					// scroll to field
 					if (!frm.scroll_set) {
-						scroll_to(doc.parentfield || df.fieldname);
+						scroll_to(doc.parentfield ? top_level_parentfield(doc) : df.fieldname);
 					}
 
 					if (folded) {
@@ -180,23 +203,13 @@ frappe.ui.form.check_mandatory = function (frm) {
 		if (error_fields.length) {
 			let meta = frappe.get_meta(doc.doctype);
 			if (meta.istable) {
-				const parentfield = doc.parentfield;
-				if (!table_errors[parentfield]) {
-					const table_field = frappe.meta.docfield_map[doc.parenttype][parentfield];
-					const table_label = __(
-						table_field.label || frappe.unscrub(table_field.fieldname)
-					).bold();
-					table_errors[parentfield] = {
-						label: table_label,
-						fields: {},
-						total_rows: (frm.doc[parentfield] || []).length,
-					};
-				}
+				const table_key = `${doc.parenttype}:${doc.parent}:${doc.parentfield}`;
+				table_errors[table_key] ??= new_table_errors(doc);
 				error_fields.forEach(function (field_label) {
-					if (!table_errors[parentfield].fields[field_label]) {
-						table_errors[parentfield].fields[field_label] = [];
+					if (!table_errors[table_key].fields[field_label]) {
+						table_errors[table_key].fields[field_label] = [];
 					}
-					table_errors[parentfield].fields[field_label].push(doc.idx);
+					table_errors[table_key].fields[field_label].push(doc.idx);
 				});
 			} else {
 				error_fields.forEach(function (field_label) {

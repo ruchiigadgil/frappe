@@ -21,6 +21,7 @@ from frappe.core.doctype.server_script.server_script_utils import get_server_scr
 from frappe.database.utils import DefaultOrderBy
 from frappe.handler import is_valid_http_method, resolve_method, run_server_script, upload_file
 from frappe.mcp import handle as handle_mcp
+from frappe.model.nested_children import load_with_root
 from frappe.model.utils import is_virtual_doctype
 
 PERMISSION_MAP = {
@@ -271,7 +272,7 @@ def update_doc(doctype: str, name: str):
 
 	# check for child table doctype
 	if doc.get("parenttype"):
-		frappe.get_doc(doc.parenttype, doc.parent).save()
+		load_with_root(doc.doctype, doc.name)[0].save()
 
 	return doc.copy_with_fieldlevel_read_permissions().as_dict()
 

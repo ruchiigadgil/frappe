@@ -178,8 +178,9 @@ FUNCTION_CALL_PATTERN = re.compile(r"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\(", flags=re.
 #   - Any of above with aliases: ... as alias
 #   - Single-quoted aliases with colons (used by reportview child fields):
 #     - ... as 'Child:field'
+#   - Nested child table paths: table.nested_table.field
 ALLOWED_FIELD_PATTERN = re.compile(
-	r"^(?:(`[\w\s-]+`|\w+)\.)?(`\w+`|\w+)(?:\s+as\s+(?:`[\w\s-]+`|'[\w\s:-]+'|\w+))?$",
+	r"^(?:(`[\w\s-]+`|\w+)\.)?(?:\w+\.)*(`\w+`|\w+)(?:\s+as\s+(?:`[\w\s-]+`|'[\w\s:-]+'|\w+))?$",
 	flags=re.IGNORECASE,
 )
 
@@ -939,7 +940,7 @@ class Engine:
 				target_doctype = dynamic_field.doctype
 				target_fieldname = dynamic_field.fieldname
 				parent_doctype_for_perm = (
-					dynamic_field.parent_doctype if isinstance(dynamic_field, ChildTableField) else None
+					dynamic_field.permission_parent if isinstance(dynamic_field, ChildTableField) else None
 				)
 				self.check_filter_field_permission(target_doctype, target_fieldname, parent_doctype_for_perm)
 
@@ -974,30 +975,15 @@ class Engine:
 			# If a specific doctype is provided and it's different from the main query doctype,
 			# if it's a child table, add the join using ChildTableField logic
 			if doctype and doctype != self.doctype:
-				# Check if doctype is a valid child table of self.doctype
-				parent_meta = frappe.get_meta(self.doctype)
-				# Find the parent fieldname for this child doctype
-				parent_fieldname = None
-				for df in parent_meta.get_table_fields():
-					if df.options == doctype:
-						parent_fieldname = df.fieldname
-						break
+				# Check if doctype is a child table of self.doctype, at any depth
+				child_field_handler = get_child_table_field(self.doctype, doctype, target_fieldname)
 
 				# If it's not a child table, check permissions
-				if not parent_fieldname:
+				if not child_field_handler:
 					self.check_filter_field_permission(
 						target_doctype, target_fieldname, parent_doctype_for_perm
 					)
 					return frappe.qb.DocType(target_doctype)[target_fieldname]
-
-				# Create a ChildTableField instance to handle join and field access
-				# Pass the identified parent_fieldname
-				child_field_handler = ChildTableField(
-					doctype=doctype,
-					fieldname=target_fieldname,
-					parent_doctype=self.doctype,
-					parent_fieldname=parent_fieldname,
-				)
 
 				# For permission check, the parent is the main doctype
 				parent_doctype_for_perm = self.doctype
@@ -1395,7 +1381,7 @@ class Engine:
 			if isinstance(field, LinkTableField):
 				selected_fields.add(f"{field.link_fieldname}.{field.fieldname}")
 			elif isinstance(field, ChildTableField) and field.parent_fieldname:
-				selected_fields.add(f"{field.parent_fieldname}.{field.fieldname}")
+				selected_fields.add(f"{field.table_path}.{field.fieldname}")
 
 			if alias := getattr(field, "alias", None):
 				selected_fields.add(alias)
@@ -1515,7 +1501,7 @@ class Engine:
 			# Check permissions for dynamic field
 			if isinstance(dynamic_field, ChildTableField):
 				self.check_filter_field_permission(
-					dynamic_field.doctype, dynamic_field.fieldname, dynamic_field.parent_doctype
+					dynamic_field.doctype, dynamic_field.fieldname, dynamic_field.permission_parent
 				)
 			elif isinstance(dynamic_field, LinkTableField):
 				# Check permission for the link field in parent doctype
@@ -1627,19 +1613,20 @@ class Engine:
 					continue
 
 				if field.parent_fieldname:
-					parent_meta = frappe.get_meta(self.doctype)
-					if parent_meta.get_field(
-						field.parent_fieldname
-					).permlevel not in parent_meta.get_permlevel_access(
+					accessible_permlevels = frappe.get_meta(self.doctype).get_permlevel_access(
 						parent_permission_type, user=self.user
+					)
+					if any(
+						frappe.get_meta(doctype).get_field(fieldname).permlevel not in accessible_permlevels
+						for doctype, fieldname in field.table_fields_on_path()
 					):
 						continue
 
 				# Cache permitted fields for child doctypes if accessed multiple times
 				permitted_child_fields_set = self._get_cached_permitted_fields(
 					field.doctype,
-					field.parent_doctype,
-					self.get_permission_type(field.doctype, field.parent_doctype),
+					field.permission_parent,
+					self.get_permission_type(field.doctype, field.permission_parent),
 				)
 				# Check permission for the specific field in the child table
 				if field.fieldname in permitted_child_fields_set:
@@ -2272,10 +2259,7 @@ class DynamicTableField:
 
 				# Basic validation for the parts to avoid unnecessary metadata lookups on invalid input
 				# We expect simple identifiers here. Quoted/complex names are handled elsewhere or by child_match.
-				if (
-					not potential_parent_fieldname.replace("_", "").isalnum()
-					or not target_fieldname.replace("_", "").isalnum()
-				):
+				if not all(part.replace("_", "").isalnum() for part in field.split(".")):
 					return None
 
 				try:
@@ -2290,6 +2274,12 @@ class DynamicTableField:
 
 				if linked_field:
 					linked_doctype = linked_field.options
+					if "." in target_fieldname:
+						if linked_field.fieldtype not in frappe.model.table_fields:
+							return None
+						return ChildTableField.nested(
+							target_fieldname, linked_doctype, doctype, potential_parent_fieldname, alias
+						)
 					if linked_field.fieldtype == "Link":
 						# It's a Link field access: parent_doctype.link_fieldname.target_fieldname
 						return LinkTableField(
@@ -2322,16 +2312,54 @@ class ChildTableField(DynamicTableField):
 		parent_doctype: str,
 		parent_fieldname: str | None = None,
 		alias: str | None = None,
+		parent_join: "ChildTableField | None" = None,
 	) -> None:
 		self.doctype = doctype
 		self.fieldname = fieldname
 		self.alias = alias
 		self.parent_doctype = parent_doctype
 		self.parent_fieldname = parent_fieldname
+		self.parent_join = parent_join
 		self.table = frappe.qb.DocType(self.doctype)
 		self.field = self.table[self.fieldname]
 
+	@classmethod
+	def nested(
+		cls, path: str, table_doctype: str, root_doctype: str, table_fieldname: str, alias: str | None
+	) -> "ChildTableField | None":
+		"""Field at the end of a dotted path (`serials.serial`) inside the `table_fieldname` table."""
+		inner = DynamicTableField.parse(path, table_doctype, allow_tab_notation=False)
+		if not isinstance(inner, cls):
+			return None
+
+		top = inner
+		while top.parent_join:
+			top = top.parent_join
+		top.parent_join = cls(table_doctype, "name", root_doctype, table_fieldname)
+		inner.alias = alias
+		return inner
+
+	@property
+	def permission_parent(self) -> str:
+		"""Permissions of a row at any depth come from the document at the top of its tree."""
+		return self.parent_join.permission_parent if self.parent_join else self.parent_doctype
+
+	@property
+	def table_path(self) -> str | None:
+		if not self.parent_fieldname:
+			return None
+		if self.parent_join:
+			return f"{self.parent_join.table_path}.{self.parent_fieldname}"
+		return self.parent_fieldname
+
+	def table_fields_on_path(self) -> list[tuple[str, str]]:
+		"""(doctype, table fieldname) of every table crossed from the root down to this field."""
+		above = self.parent_join.table_fields_on_path() if self.parent_join else []
+		return [*above, (self.parent_doctype, self.parent_fieldname)]
+
 	def apply_join(self, query: QueryBuilder, engine: "Engine" = None) -> QueryBuilder:
+		if self.parent_join:
+			query = self.parent_join.apply_join(query, engine=engine)
 		main_table = frappe.qb.DocType(self.parent_doctype)
 		if not query.is_joined(self.table):
 			parent_name = _cast_autoincrement_name(main_table.name, self.parent_doctype)
@@ -2407,6 +2435,23 @@ class ChildQuery:
 			filters=filters,
 			order_by="idx asc",
 		)
+
+
+def get_child_table_field(root_doctype: str, child_doctype: str, fieldname: str) -> ChildTableField | None:
+	"""Field of a child table at any depth below `root_doctype`, joined through every table above it."""
+	from frappe.model.nested_children import table_path
+
+	hops = table_path(root_doctype, child_doctype)
+	if not hops:
+		return None
+
+	parent_join = None
+	for parent_doctype, table_fieldname, table_doctype in hops[:-1]:
+		parent_join = ChildTableField(
+			table_doctype, "name", parent_doctype, table_fieldname, parent_join=parent_join
+		)
+	parent_doctype, table_fieldname, table_doctype = hops[-1]
+	return ChildTableField(table_doctype, fieldname, parent_doctype, table_fieldname, parent_join=parent_join)
 
 
 def get_nested_set_hierarchy_result(doctype: str, name: str, hierarchy: str) -> list[str]:

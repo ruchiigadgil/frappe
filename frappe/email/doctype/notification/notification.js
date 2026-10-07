@@ -14,7 +14,9 @@ frappe.notification = {
 			let get_select_options = function (df, parent_field) {
 				// Append parent_field name along with fieldname for child table fields
 				let select_value = parent_field ? df.fieldname + "," + parent_field : df.fieldname;
-				let path = parent_field ? parent_field + " > " + df.fieldname : df.fieldname;
+				let path = parent_field
+					? parent_field.replaceAll(".", " > ") + " > " + df.fieldname
+					: df.fieldname;
 
 				return {
 					value: select_value,
@@ -49,20 +51,16 @@ frappe.notification = {
 						(df.options == "Customer" && df.fieldtype == "Link")
 					);
 				};
-				let extract_receiver_field = function (df) {
-					// Add recipients from child doctypes into select dropdown
+				let extract_receiver_field = function (df, table_path) {
+					// Add recipients from child doctypes, at any depth, into select dropdown
 					if (frappe.model.table_fields.includes(df.fieldtype)) {
+						let path = table_path ? table_path + "." + df.fieldname : df.fieldname;
 						let child_fields = frappe.get_doc("DocType", df.options).fields;
-						return $.map(child_fields, function (cdf) {
-							return is_receiver_field(cdf)
-								? get_select_options(cdf, df.fieldname)
-								: null;
-						});
-					} else {
-						return is_receiver_field(df) ? get_select_options(df) : null;
+						return $.map(child_fields, (cdf) => extract_receiver_field(cdf, path));
 					}
+					return is_receiver_field(df) ? get_select_options(df, table_path) : null;
 				};
-				return $.map(fields, extract_receiver_field);
+				return $.map(fields, (df) => extract_receiver_field(df));
 			};
 
 			let fields = frappe.get_doc("DocType", frm.doc.document_type).fields;

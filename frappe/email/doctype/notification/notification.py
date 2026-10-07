@@ -15,6 +15,7 @@ from frappe.integrations.doctype.notification_webhook_url.notification_webhook_u
 	NotificationWebhookURL,
 )
 from frappe.model.document import Document
+from frappe.model.nested_children import get_root
 from frappe.modules.utils import export_module_json, get_doc_module
 from frappe.utils import (
 	add_to_date,
@@ -674,7 +675,7 @@ def get_context(context):
 					recipient.receiver_by_document_field
 				)
 				if child_field:
-					for d in doc.get(child_field):
+					for d in get_rows_at_path(doc, child_field):
 						email_id = d.get(data_field)
 						if email_id == "Administrator":
 							email_id = get_email_address("Administrator")
@@ -723,7 +724,7 @@ def get_context(context):
 					recipient.receiver_by_document_field
 				)
 				if child_field:
-					for d in doc.get(child_field):
+					for d in get_rows_at_path(doc, child_field):
 						if recv := recipient_extractor_func(d, data_field):
 							receiver_list.append(recv)
 				# field from current doc
@@ -994,11 +995,11 @@ def get_emails_from_template(template, context):
 
 
 def get_reference_doctype(doc):
-	return doc.parenttype if doc.meta.istable else doc.doctype
+	return get_root(doc.parenttype, doc.parent)[0] if doc.meta.istable else doc.doctype
 
 
 def get_reference_name(doc):
-	return doc.parent if doc.meta.istable else doc.name
+	return get_root(doc.parenttype, doc.parent)[1] if doc.meta.istable else doc.name
 
 
 def _parse_receiver_by_document_field(s):
@@ -1009,6 +1010,14 @@ def _parse_receiver_by_document_field(s):
 	else:
 		data_field, child_field = fragments[0], None
 	return data_field, child_field
+
+
+def get_rows_at_path(doc, path):
+	"""Return the rows a dotted table path (`items.serials`) reaches from `doc`."""
+	rows = [doc]
+	for fieldname in path.split("."):
+		rows = [child for row in rows for child in row.get(fieldname) or []]
+	return rows
 
 
 def create_notifications(notifications: list[dict], update: bool = False):

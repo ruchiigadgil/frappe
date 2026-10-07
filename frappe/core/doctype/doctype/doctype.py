@@ -1795,6 +1795,14 @@ def validate_fields(meta: Meta):
 				title=_("Virtual tables must be virtual fields"),
 			)
 
+		if meta.istable and table_contains(doctype, meta.name):
+			frappe.throw(
+				_("Child Table {0} for field {1} would place {2} inside itself").format(
+					frappe.bold(doctype), frappe.bold(docfield.fieldname), frappe.bold(meta.name)
+				),
+				title=_("Invalid Option"),
+			)
+
 	def check_max_height(docfield):
 		if getattr(docfield, "max_height", None) and (docfield.max_height[-2:] not in ("px", "em")):
 			frappe.throw(f"Max for {frappe.bold(docfield.fieldname)} height must be in px, em, rem")
@@ -2255,3 +2263,16 @@ def get_row_size_utilization(doctype: str) -> float:
 		return flt(frappe.db.get_row_size(doctype) / frappe.db.MAX_ROW_SIZE_LIMIT * 100, 2)
 	except Exception:
 		return 0.0
+
+
+def table_contains(doctype: str, target: str) -> bool:
+	"""Return True if `doctype` is `target`, or holds it in a table at any depth."""
+	pending, seen = [doctype], set()
+	while pending:
+		current = pending.pop()
+		if current == target:
+			return True
+		if current not in seen:
+			seen.add(current)
+			pending.extend(frappe.get_meta(current)._table_doctypes.values())
+	return False

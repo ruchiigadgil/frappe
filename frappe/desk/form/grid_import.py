@@ -257,11 +257,14 @@ def check_permission(doctype: str, ptype: str, docname: str | None = None):
 def get_child_doctype(doctype: str, fieldname: str, docname: str | None = None) -> str:
 	check_permission(doctype, "write", docname)
 
-	table_df = frappe.get_meta(doctype).get_field(fieldname)
-	if not table_df or table_df.fieldtype not in table_fields:
-		frappe.throw(_("{0} is not a table field").format(frappe.bold(fieldname)))
+	child_doctype = doctype
+	for table_fieldname in fieldname.split("."):
+		table_df = frappe.get_meta(child_doctype).get_field(table_fieldname)
+		if not table_df or table_df.fieldtype not in table_fields:
+			frappe.throw(_("{0} is not a table field").format(frappe.bold(fieldname)))
+		child_doctype = table_df.options
 
-	return table_df.options
+	return child_doctype
 
 
 def get_writable_fields(doctype: str, child_doctype: str) -> set[str]:

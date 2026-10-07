@@ -837,6 +837,7 @@ def has_child_permission(
 	*,
 	debug=False,
 	print_logs=True,
+	child_permlevels=(),
 ) -> bool:
 	debug and _debug_log("This doctype is a child table, permissions will be checked on parent.")
 	if isinstance(child_doc, str):
@@ -894,21 +895,22 @@ def has_child_permission(
 			)
 			return False
 
-		# TODO(human): when parent_meta.istable, it has no permissions of its own
-		permlevel = parent_meta.get_field(parentfield).permlevel
-		# checking for select == checking for "select or read"
-		# select does not support access of higher permlevel child tables, but read does
-		accessible_permlevels = parent_meta.get_permlevel_access(
-			"read" if ptype == "select" else ptype, user=user
-		)
-		if permlevel > 0 and permlevel not in accessible_permlevels:
-			push_perm_check_log(
-				_("Insufficient Permission Level for {0}").format(frappe.bold(parent_doctype)), debug=debug
+		permlevels = (*child_permlevels, parent_meta.get_field(parentfield).permlevel)
+		if not parent_meta.istable:
+			# checking for select == checking for "select or read"
+			# select does not support access of higher permlevel child tables, but read does
+			accessible_permlevels = parent_meta.get_permlevel_access(
+				"read" if ptype == "select" else ptype, user=user
 			)
-			debug and _debug_log(
-				f"This table is perm level {permlevel} but user only has access to {accessible_permlevels}"
-			)
-			return False
+			if denied := [level for level in permlevels if level > 0 and level not in accessible_permlevels]:
+				push_perm_check_log(
+					_("Insufficient Permission Level for {0}").format(frappe.bold(parent_doctype)),
+					debug=debug,
+				)
+				debug and _debug_log(
+					f"This table is perm level {denied[0]} but user only has access to {accessible_permlevels}"
+				)
+				return False
 
 		parent_doc = child_doc.parent_doc if hasattr(child_doc, "parent_doc") else None
 		if parent_doc is None:
@@ -924,6 +926,7 @@ def has_child_permission(
 			user=user,
 			debug=debug,
 			print_logs=print_logs,
+			child_permlevels=permlevels,
 		)
 
 	return has_permission(

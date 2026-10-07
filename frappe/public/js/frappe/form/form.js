@@ -373,28 +373,24 @@ frappe.ui.form.Form = class FrappeForm {
 			}
 		);
 
-		// on table fields
-		var table_fields = frappe.get_children("DocType", me.doctype, "fields", {
-			fieldtype: ["in", frappe.model.table_fields],
-		});
-
-		// using $.each to preserve df via closure
-		$.each(table_fields, function (i, df) {
+		// on table fields, at every depth
+		for (const child_doctype of frappe.meta.get_descendant_doctypes(me.doctype)) {
 			frappe.model.on(
-				df.options,
+				child_doctype,
 				"*",
 				function (fieldname, value, doc, skip_dirty_trigger = false) {
-					if (doc.parent == me.docname && doc.parentfield === df.fieldname) {
+					const root = frappe.model.get_root_doc(doc);
+					if (root?.doctype === me.doctype && root.name == me.docname) {
 						if (!skip_dirty_trigger) {
 							me.dirty();
 						}
 
-						me.fields_dict[df.fieldname].grid.set_value(fieldname, value, doc);
+						me.get_grid_for(doc)?.set_value(fieldname, value, doc);
 						return me.script_manager.trigger(fieldname, doc.doctype, doc.name);
 					}
 				}
 			);
-		});
+		}
 	}
 
 	setup_notify_on_rename() {
@@ -2103,6 +2099,16 @@ frappe.ui.form.Form = class FrappeForm {
 				this.refresh_field(fieldname);
 			}
 		}
+	}
+
+	get_grid_for(doc) {
+		// the grid that shows `doc`: a table on this form, or one inside an open row form
+		if (doc.parenttype === this.doctype) {
+			return this.fields_dict[doc.parentfield]?.grid;
+		}
+		const parent = locals[doc.parenttype]?.[doc.parent];
+		const parent_row = parent && this.get_grid_for(parent)?.get_row(parent.name);
+		return parent_row?.grid_form?.fields_dict?.[doc.parentfield]?.grid;
 	}
 
 	get_docfield(fieldname1, fieldname2) {

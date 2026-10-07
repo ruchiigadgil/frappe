@@ -185,6 +185,37 @@ def create_child_doctype(name: str | int, fields: str | list | dict):
 
 
 @whitelist_for_tests()
+def create_nested_child_table_doctypes():
+	"""A parent whose `items` rows hold a `serials` table of their own."""
+	create_child_doctype(
+		"Nested UI Serial",
+		[{"label": "Serial", "fieldname": "serial", "fieldtype": "Data", "reqd": 1, "in_list_view": 1}],
+	)
+	create_child_doctype(
+		"Nested UI Item",
+		[
+			{"label": "Item", "fieldname": "item", "fieldtype": "Data", "in_list_view": 1},
+			{"label": "Serials", "fieldname": "serials", "fieldtype": "Table", "options": "Nested UI Serial"},
+		],
+	)
+	if frappe.db.exists("DocType", "Nested UI Parent"):
+		return
+	frappe.get_doc(
+		{
+			"doctype": "DocType",
+			"module": "Core",
+			"custom": 1,
+			"name": "Nested UI Parent",
+			"fields": [
+				{"label": "Title", "fieldname": "title", "fieldtype": "Data"},
+				{"label": "Items", "fieldname": "items", "fieldtype": "Table", "options": "Nested UI Item"},
+			],
+			"permissions": [{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}],
+		}
+	).insert()
+
+
+@whitelist_for_tests()
 def create_contact_records():
 	if frappe.get_all("Contact", {"first_name": "Test Form Contact 1"}):
 		return

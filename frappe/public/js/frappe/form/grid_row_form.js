@@ -151,6 +151,8 @@ export default class GridRowForm {
 		// wait for animation and then focus on the first row
 		var me = this;
 		setTimeout(function () {
+			// a row opened inside this one meanwhile keeps the focus
+			if (frappe.ui.form.get_open_grid_form() !== me.row) return;
 			if ((me.row.frm && me.row.frm.doc.docstatus === 0) || !me.row.frm) {
 				var first = me.form_area.find("input:first");
 				if (

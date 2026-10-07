@@ -16,6 +16,7 @@ from frappe.core.doctype.comment.comment import get_document_comments
 from frappe.desk.form.document_follow import is_document_followed
 from frappe.desk.link_title import send_link_titles
 from frappe.model.document import Document
+from frappe.model.nested_children import descendant_doctypes
 from frappe.model.utils.user_settings import get_user_settings
 from frappe.permissions import (
 	check_doctype_permission,
@@ -90,9 +91,8 @@ def get_meta_bundle(doctype):
 	form_meta = frappe.desk.form.meta.get_meta(doctype)
 	bundle = [form_meta.as_dict(no_nulls=True)]
 	bundle.extend(
-		frappe.desk.form.meta.get_meta(df.options).as_dict(no_nulls=True, parenttype=doctype)
-		for df in form_meta.fields
-		if df.fieldtype in frappe.model.table_fields
+		frappe.desk.form.meta.get_meta(child_doctype).as_dict(no_nulls=True, parenttype=doctype)
+		for child_doctype in descendant_doctypes(doctype)
 	)
 	return bundle
 
@@ -238,8 +238,8 @@ def get_permlevel_restricted_fieldnames(dt) -> set:
 
 	meta = frappe.get_meta(dt)
 	all_fields = meta.fields.copy()
-	for table_field in meta.get_table_fields(include_computed=True):
-		all_fields += frappe.get_meta(table_field.options).fields or []
+	for child_doctype in descendant_doctypes(dt):
+		all_fields += frappe.get_meta(child_doctype).fields or []
 
 	if all(df.permlevel == 0 for df in all_fields):
 		return set()
@@ -252,8 +252,8 @@ def get_permlevel_restricted_fieldnames(dt) -> set:
 	# a fieldname restricted in any table it appears in fails closed (dropped everywhere), since
 	# attached_to_field alone can't identify which table a given file's field actually came from
 	restricted = restricted_fieldnames(meta, readable_permlevels(meta))
-	for table_field in meta.get_table_fields(include_computed=True):
-		child_meta = frappe.get_meta(table_field.options)
+	for child_doctype in descendant_doctypes(dt):
+		child_meta = frappe.get_meta(child_doctype)
 		restricted |= restricted_fieldnames(child_meta, readable_permlevels(child_meta, parenttype=dt))
 
 	return restricted
@@ -639,6 +639,7 @@ def get_title_values_for_table_and_multiselect_fields(doc, table_fields=None):
 
 		for value in doc.get(field.fieldname):
 			link_titles.update(get_title_values_for_link_and_dynamic_link_fields(value))
+			link_titles.update(get_title_values_for_table_and_multiselect_fields(value))
 
 	return link_titles
 

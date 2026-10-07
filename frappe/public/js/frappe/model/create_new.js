@@ -273,7 +273,7 @@ $.extend(frappe.model, {
 			}
 		}
 
-		if (cur_frm && cur_frm.doc == parent_doc) cur_frm.dirty();
+		if (cur_frm && frappe.model.get_root_doc(parent_doc) === cur_frm.doc) cur_frm.dirty();
 
 		return child;
 	},

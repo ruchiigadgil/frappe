@@ -90,6 +90,15 @@
 				</td>
 				{% endfor %}
 			</tr>
+			{% for nested in df.nested_tables or [] if nested.table_columns and row.get(nested.fieldname) %}
+			<tr class="table-row nested-table-row">
+				<td class="column-value" colspan="{{ columns|length }}">
+					{%- with df=nested, doc=row -%}
+					{% include "templates/print_format/macros/Table.html" %}
+					{%- endwith -%}
+				</td>
+			</tr>
+			{% endfor %}
 			{% endfor %}
 		</tbody>
 		{# after tbody (HTML5 order): user styles that remap tfoot's display can

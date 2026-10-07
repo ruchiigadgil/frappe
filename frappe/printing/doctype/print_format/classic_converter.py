@@ -144,6 +144,8 @@ def convert_classic_to_beta(format_data, meta, print_format=None) -> tuple[dict,
 			if meta_df.fieldtype == "Table":
 				field["show_label"] = "hide"
 				field["table_columns"] = convert_table_columns(df, meta_df, dropped)
+				if nested_tables := convert_nested_tables(meta_df):
+					field["nested_tables"] = nested_tables
 			add_field(field)
 
 	layout["sections"] = [
@@ -185,6 +187,8 @@ def convert_table_columns(df, meta_df, dropped) -> list:
 			if not child_df:
 				dropped.append(f"{meta_df.fieldname}.{col.fieldname}")
 				continue
+			if child_df.fieldtype == "Table":
+				continue
 			columns.append(
 				{
 					"label": child_df.label or child_df.fieldname,
@@ -198,7 +202,7 @@ def convert_table_columns(df, meta_df, dropped) -> list:
 		child_fields = [
 			child_df
 			for child_df in child_meta.fields
-			if child_df.fieldtype not in ("Section Break", "Column Break", "Tab Break")
+			if child_df.fieldtype not in ("Section Break", "Column Break", "Tab Break", "Table")
 			and not cint(child_df.print_hide)
 		]
 		if len(child_fields) > MAX_DEFAULT_TABLE_COLUMNS:
@@ -221,6 +225,22 @@ def convert_table_columns(df, meta_df, dropped) -> list:
 			)
 
 	return distribute_widths(columns)
+
+
+def convert_nested_tables(meta_df) -> list:
+	"""Tables inside the rows of `meta_df`, each printed under the row that holds it."""
+	return [
+		{
+			"label": child_df.label or child_df.fieldname,
+			"fieldname": child_df.fieldname,
+			"fieldtype": "Table",
+			"options": child_df.options,
+			"table_columns": convert_table_columns(frappe._dict(fieldname=child_df.fieldname), child_df, []),
+			"nested_tables": convert_nested_tables(child_df),
+		}
+		for child_df in frappe.get_meta(meta_df.options).fields
+		if child_df.fieldtype == "Table" and not cint(child_df.print_hide)
+	]
 
 
 def parse_print_width(print_width) -> float | None:
@@ -384,6 +404,8 @@ def create_default_layout(meta) -> dict:
 			if df.fieldtype == "Table":
 				field["show_label"] = "hide"
 				field["table_columns"] = convert_table_columns(frappe._dict(fieldname=df.fieldname), df, [])
+				if nested_tables := convert_nested_tables(df):
+					field["nested_tables"] = nested_tables
 			state.column["fields"].append(field)
 			state.section["has_fields"] = True
 

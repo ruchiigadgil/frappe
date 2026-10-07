@@ -264,6 +264,8 @@ export function create_default_layout(meta, print_format) {
 
 				if (df.fieldtype === "Table") {
 					field.table_columns = get_table_columns(df);
+					let nested_tables = get_nested_tables(df);
+					if (nested_tables.length) field.nested_tables = nested_tables;
 				}
 
 				column.fields.push(field);
@@ -282,7 +284,9 @@ export function get_table_columns(df) {
 	let table_fields = frappe
 		.get_meta(df.options)
 		.fields.filter(
-			(tf) => !["Section Break", "Column Break"].includes(tf.fieldtype) && !tf.print_hide
+			(tf) =>
+				!["Section Break", "Column Break", "Table"].includes(tf.fieldtype) &&
+				!tf.print_hide
 		);
 	if (table_fields.some((tf) => tf.in_list_view)) {
 		table_fields = table_fields.filter((tf) => tf.in_list_view);
@@ -303,6 +307,27 @@ export function get_table_columns(df) {
 		}
 	}
 	return table_columns;
+}
+
+// tables inside the rows of `df`, each printed under the row that holds it
+function get_nested_tables(df) {
+	return frappe
+		.get_meta(df.options)
+		.fields.filter((tf) => tf.fieldtype === "Table" && !tf.print_hide)
+		.map((tf) => ({
+			label: tf.label || tf.fieldname,
+			fieldname: tf.fieldname,
+			fieldtype: "Table",
+			options: tf.options,
+			table_columns: get_table_columns(tf),
+			nested_tables: get_nested_tables(tf),
+		}));
+}
+
+export function nested_tables_in_row(df, row) {
+	return (df.nested_tables || []).filter(
+		(nested) => nested.table_columns?.length && row[nested.fieldname]?.length
+	);
 }
 
 function get_field_template(print_format, fieldname) {
@@ -362,6 +387,7 @@ export const FIELD_PLUCK_KEYS = [
 	"fieldtype",
 	"options",
 	"table_columns",
+	"nested_tables",
 	"table_style",
 	"table_bordered",
 	"table_header",

@@ -142,10 +142,7 @@ def cast_client_values(document: "Document"):
 	from frappe.model import table_fields
 	from frappe.utils.data import cast
 
-	rows = [document]
-	for df in document.meta.get_table_fields():
-		rows.extend(document.get(df.fieldname) or [])
-	for row in rows:
+	for row in [document, *document.get_all_children()]:
 		for df in row.meta.fields:
 			value = row.get(df.fieldname)
 			if value in (None, "") or df.fieldtype in table_fields:
@@ -336,14 +333,17 @@ def set_title_values_for_link_and_dynamic_link_fields(
 			doc.__link_titles[f"{doctype}::{doc.get(field.fieldname)}"] = link_title
 
 
-def set_title_values_for_table_and_multiselect_fields(meta: "Meta", doc: "Document") -> None:
+def set_title_values_for_table_and_multiselect_fields(
+	meta: "Meta", doc: "Document", root_doc: "Document" | None = None
+) -> None:
 	for field in meta.get_table_fields(include_computed=True):
 		if not doc.get(field.fieldname):
 			continue
 
 		_meta = frappe.get_meta(field.options)
 		for value in doc.get(field.fieldname):
-			set_title_values_for_link_and_dynamic_link_fields(_meta, value, doc)
+			set_title_values_for_link_and_dynamic_link_fields(_meta, value, root_doc or doc)
+			set_title_values_for_table_and_multiselect_fields(_meta, value, root_doc or doc)
 
 
 def convert_markdown(doc: "Document") -> None:

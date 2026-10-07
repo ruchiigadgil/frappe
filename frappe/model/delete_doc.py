@@ -13,6 +13,7 @@ from frappe.desk.doctype.tag.tag import delete_tags_for_document
 from frappe.model.docstatus import DocStatus
 from frappe.model.dynamic_links import get_dynamic_link_map
 from frappe.model.naming import revert_series_if_last
+from frappe.model.nested_children import delete_descendants, get_root, nested_tables
 from frappe.model.utils import is_virtual_doctype
 from frappe.query_builder import DocType
 from frappe.utils.data import get_link_to_form
@@ -292,6 +293,8 @@ def delete_from_table(doctype: str, name: str, ignore_doctypes: list[str], doc):
 	child_doctypes_to_delete = set(child_doctypes) - set(ignore_doctypes)
 	for child_doctype in child_doctypes_to_delete:
 		child_filters = {"parenttype": doctype, "parent": name}
+		if nested_tables(child_doctype):
+			delete_descendants({child_doctype: frappe.get_all(child_doctype, filters=child_filters, pluck="name")})
 		delete_child_row_passwords(child_doctype, child_filters)
 		frappe.db.delete(child_doctype, child_filters)
 
@@ -389,7 +392,9 @@ def get_linked_docs(doc, method="Delete", limit: int | None = None) -> list[dict
 		for item in rows:
 			# available only in child table cases
 			item_parent = getattr(item, "parent", None)
-			linked_parent_doctype = item.parenttype if item_parent else link_dt
+			linked_parent_doctype, reference_docname = (
+				get_root(item.parenttype, item_parent) if item_parent else (link_dt, item.name)
+			)
 
 			if linked_parent_doctype in ignored_doctypes:
 				continue
@@ -402,7 +407,6 @@ def get_linked_docs(doc, method="Delete", limit: int | None = None) -> list[dict
 				# don't add if linked to same item or doc having same name as the item
 				continue
 			else:
-				reference_docname = item_parent or item.name
 				linked_docs.append(
 					{
 						"doc": doc.name,
@@ -493,8 +497,11 @@ def get_dynamic_linked_docs(doc, method="Delete", limit: int | None = None) -> l
 				if (method == "Delete" and not DocStatus(refdoc.docstatus).is_cancelled()) or (
 					method == "Cancel" and DocStatus(refdoc.docstatus).is_submitted()
 				):
-					reference_doctype = refdoc.parenttype if meta.istable else df.parent
-					reference_docname = refdoc.parent if meta.istable else refdoc.name
+					reference_doctype, reference_docname = (
+						get_root(refdoc.parenttype, refdoc.parent)
+						if meta.istable
+						else (df.parent, refdoc.name)
+					)
 
 					if reference_doctype in frappe.get_hooks("ignore_links_on_delete") or (
 						reference_doctype in ignore_linked_doctypes and method == "Cancel"

@@ -11,6 +11,7 @@ import re
 import time
 import warnings
 import weakref
+from collections import defaultdict
 from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from functools import cached_property, wraps
@@ -53,6 +54,13 @@ from frappe.model import (
 from frappe.model.docstatus import DocStatus
 from frappe.model.dynamic_links import invalidate_distinct_link_doctypes
 from frappe.model.naming import set_new_name, validate_name
+from frappe.model.nested_children import (
+	delete_descendants,
+	descendant_doctypes,
+	get_root,
+	load_descendants,
+	nested_tables,
+)
 from frappe.model.utils import is_virtual_doctype, simple_singledispatch
 from frappe.model.utils.link_count import notify_link_count
 from frappe.modules import load_doctype_module
@@ -580,6 +588,7 @@ def _fetch_rows(doctype, *, filters, order_by, limit, offset, for_update, child_
 	fetched_docs_by_name = {row.name: row for row in data}
 	parent_names = list(fetched_docs_by_name.keys())
 
+	rows_by_doctype = defaultdict(list)
 	for fieldname, child_doctype in child_tables:
 		child_table_data = frappe.qb.get_query(
 			table=child_doctype,
@@ -599,6 +608,9 @@ def _fetch_rows(doctype, *, filters, order_by, limit, offset, for_update, child_
 			if child.parent in fetched_docs_by_name:
 				fetched_docs_by_name[child.parent][fieldname].append(child)
 
+		rows_by_doctype[child_doctype].extend(child_table_data)
+
+	load_descendants(rows_by_doctype, for_update=for_update)
 	return list(fetched_docs_by_name.values())
 
 
@@ -876,21 +888,24 @@ class Document(_DocumentBase):
 			val = self.get(field.fieldname)
 			self.set(field.fieldname, mask_field_value(field, val))
 
-		for table_field in self.meta.get_table_fields():
-			child_mask_fields = frappe.get_meta(table_field.options).get_masked_fields(
-				parenttype=self.doctype
-			)
-			if not child_mask_fields:
-				continue
-
-			masked_fieldnames = {field.fieldname for field in child_mask_fields}
-			for row in self.get(table_field.fieldname) or []:
-				row.flags.masked_fieldnames = masked_fieldnames
-				for field in child_mask_fields:
+		child_mask_fields = self._get_child_masked_fields()
+		for row in self.get_all_children():
+			if masked := child_mask_fields.get(row.doctype):
+				row.flags.masked_fieldnames = {field.fieldname for field in masked}
+				for field in masked:
 					row.set(field.fieldname, mask_field_value(field, row.get(field.fieldname)))
+
+	def _get_child_masked_fields(self) -> dict[str, list]:
+		"""Masked fields of every nested child DocType, judged by this document's permissions."""
+		return {
+			doctype: masked
+			for doctype in descendant_doctypes(self.doctype, include_computed=False)
+			if (masked := frappe.get_meta(doctype).get_masked_fields(parenttype=self.doctype))
+		}
 
 	def load_children_from_db(self):
 		is_doctype = self.doctype == "DocType"
+		loaded = {}
 
 		for fieldname, child_doctype in self._table_fieldnames.items():
 			# Make sure not to query the DB for a child table, if it is a virtual one.
@@ -913,9 +928,15 @@ class Document(_DocumentBase):
 			else:
 				children = self._load_child_table_from_db(fieldname, child_doctype)
 
-			if children is None:
-				children = []
+			loaded[fieldname] = children or []
 
+		if not is_doctype:
+			rows_by_doctype = defaultdict(list)
+			for fieldname, children in loaded.items():
+				rows_by_doctype[self._table_fieldnames[fieldname]].extend(children)
+			load_descendants(rows_by_doctype, for_update=bool(self.flags.for_update))
+
+		for fieldname, children in loaded.items():
 			self.set(fieldname, children)
 
 		return self
@@ -1140,8 +1161,8 @@ class Document(_DocumentBase):
 		self.set_user_and_timestamp()
 		self.set_docstatus()
 		self.check_if_latest()
-		self.set_parent_in_children()
 		self.set_name_in_children()
+		self.set_parent_in_children()
 
 		self.validate_higher_perm_levels()
 		self._validate_links()
@@ -1229,6 +1250,8 @@ class Document(_DocumentBase):
 			if existing_row_names:
 				removed_rows["name"] = ("not in", existing_row_names)
 
+			if nested_tables(df.options):
+				delete_descendants({df.options: frappe.get_all(df.options, filters=removed_rows, pluck="name")})
 			delete_child_row_passwords(df.options, removed_rows)
 			frappe.db.delete(df.options, removed_rows)
 
@@ -1236,12 +1259,16 @@ class Document(_DocumentBase):
 		for d in all_rows:
 			d: Document
 			d.db_update()
+			d.update_children()
 
 	def reset_computed_child_tables(self):
 		"""Reset computed child tables so that they are reloaded next time"""
 		for df in self.meta.get_table_fields(include_computed=True):
 			if df.is_virtual:
 				self.__dict__.pop(df.fieldname, None)
+
+		for d in self.get_direct_children():
+			d.reset_computed_child_tables()
 
 	def get_doc_before_save(self) -> "Self":
 		return getattr(self, "_doc_before_save", None)
@@ -1555,8 +1582,8 @@ class Document(_DocumentBase):
 			return
 
 		all_fields = self.meta.fields.copy()
-		for table_field in self.meta.get_table_fields(include_computed=True):
-			all_fields += frappe.get_meta(table_field.options).fields or []
+		for doctype in descendant_doctypes(self.doctype):
+			all_fields += frappe.get_meta(doctype).fields or []
 
 		if all(df.permlevel == 0 for df in all_fields):
 			self.mask_fields()
@@ -1572,12 +1599,10 @@ class Document(_DocumentBase):
 					# hasattr might return True for class attribute which can't be delattr-ed.
 					continue
 
-		for table_field in self.meta.get_table_fields(include_computed=True):
-			for df in frappe.get_meta(table_field.options).fields or []:
-				if df.permlevel and df.permlevel not in has_access_to:
-					for child in self.get(table_field.fieldname) or []:
-						if hasattr(child, df.fieldname):
-							delattr(child, df.fieldname)
+		for child in self.get_all_children(include_computed=True):
+			for df in child.meta.fields:
+				if df.permlevel and df.permlevel not in has_access_to and hasattr(child, df.fieldname):
+					delattr(child, df.fieldname)
 
 		self.mask_fields()
 
@@ -1612,11 +1637,7 @@ class Document(_DocumentBase):
 			return
 
 		mask_fields = self.meta.get_masked_fields()
-		child_mask_fields = {
-			table_field.fieldname: masked
-			for table_field in self.meta.get_table_fields()
-			if (masked := frappe.get_meta(table_field.options).get_masked_fields(parenttype=self.doctype))
-		}
+		child_mask_fields = self._get_child_masked_fields()
 		if not mask_fields and not child_mask_fields:
 			return
 
@@ -1627,15 +1648,15 @@ class Document(_DocumentBase):
 		for df in mask_fields:
 			self.set(df.fieldname, db_doc.get(df.fieldname))
 
-		for fieldname, masked in child_mask_fields.items():
-			db_rows = {row.name: row for row in db_doc.get(fieldname)}
-			for row in self.get(fieldname) or []:
-				db_row = db_rows.get(row.name)
-				# new rows have no DB counterpart — nothing to restore
-				if not db_row:
-					continue
-				for df in masked:
-					row.set(df.fieldname, db_row.get(df.fieldname))
+		db_rows = {(row.doctype, row.name): row for row in db_doc.get_all_children()}
+		for row in self.get_all_children():
+			masked = child_mask_fields.get(row.doctype)
+			db_row = db_rows.get((row.doctype, row.name))
+			# new rows have no DB counterpart — nothing to restore
+			if not masked or not db_row:
+				continue
+			for df in masked:
+				row.set(df.fieldname, db_row.get(df.fieldname))
 
 	def validate_higher_perm_levels(self):
 		"""If the user does not have permissions at permlevel > 0, then reset the values to original / default"""
@@ -1656,11 +1677,9 @@ class Document(_DocumentBase):
 			return
 
 		# check for child tables
-		for df in self.meta.get_table_fields():
-			high_permlevel_fields = frappe.get_meta(df.options).get_high_permlevel_fields()
-			if high_permlevel_fields:
-				for d in self.get(df.fieldname):
-					d.reset_values_if_no_permlevel_access(has_access_to, high_permlevel_fields)
+		for d in self.get_all_children():
+			if high_permlevel_fields := d.meta.get_high_permlevel_fields():
+				d.reset_values_if_no_permlevel_access(has_access_to, high_permlevel_fields)
 
 	def get_permlevel_access(self, permission_type="write"):
 		allowed_permlevels = []
@@ -1680,12 +1699,18 @@ class Document(_DocumentBase):
 
 	def get_permissions(self):
 		if self.meta.istable:
-			# use parent permissions
-			permissions = frappe.get_meta(self.parenttype).permissions
-		else:
-			permissions = self.meta.permissions
+			# use the permissions of the document at the top of the tree
+			return frappe.get_meta(self._get_root_doctype()).permissions
 
-		return permissions
+		return self.meta.permissions
+
+	def _get_root_doctype(self) -> str:
+		row = self
+		while row.parent_doc is not None and row.parent_doc.meta.istable:
+			row = row.parent_doc
+		if row.parent_doc is not None:
+			return row.parent_doc.doctype
+		return get_root(row.parenttype, row.parent)[0]
 
 	def _set_defaults(self):
 		if frappe.flags.in_import:
@@ -1695,7 +1720,9 @@ class Document(_DocumentBase):
 			new_doc = frappe.new_doc(self.doctype, as_dict=True)
 			self.update_if_missing(new_doc)
 
-		# children
+		self._set_children_defaults()
+
+	def _set_children_defaults(self):
 		for df in self.meta.get_table_fields():
 			new_doc = frappe.new_doc(df.options, parent_doc=self, parentfield=df.fieldname, as_dict=True)
 			value = self.get(df.fieldname)
@@ -1703,6 +1730,7 @@ class Document(_DocumentBase):
 				for d in value:
 					if d.is_new():
 						d.update_if_missing(new_doc)
+					d._set_children_defaults()
 
 	def check_if_latest(self):
 		"""Checks if `modified` timestamp provided by document being updated is same as the
@@ -2217,11 +2245,15 @@ class Document(_DocumentBase):
 
 			return frappe.clear_last_message()
 
+		self._set_children_before_save(self._doc_before_save)
+
+	def _set_children_before_save(self, before: "Document") -> None:
 		for fieldname in self._non_computed_table_fieldnames:
+			before_rows = {row.name: row for row in before.get(fieldname) or []}
 			for row in self.get(fieldname) or []:
-				row._doc_before_save = next(
-					(d for d in (self._doc_before_save.get(fieldname) or []) if d.name == row.name), None
-				)
+				row._doc_before_save = before_rows.get(row.name)
+				if row._doc_before_save:
+					row._set_children_before_save(row._doc_before_save)
 
 	def run_post_save_methods(self):
 		"""Run standard methods after `INSERT` or `UPDATE`. Standard Methods are:
@@ -3431,7 +3463,7 @@ class Document(_DocumentBase):
 		self.db_update()
 		for fieldname in self._non_computed_table_fieldnames:
 			for doc in self.get(fieldname):
-				doc.db_update()
+				doc.db_update_all()
 
 	def show_unique_validation_message(self, e):
 		if frappe.db.db_type == "mariadb":
@@ -4238,31 +4270,22 @@ def bulk_insert(
 	        - Documents can be any iterable / generator containing Document objects
 	"""
 
-	doctype_meta = frappe.get_meta(doctype)
-
-	valid_column_map = {
-		doctype: doctype_meta.get_valid_columns(),
-	}
-
-	child_table_fields = doctype_meta.get_table_fields()
-	for child_table in child_table_fields:
-		valid_column_map[child_table.options] = frappe.get_meta(child_table.options).get_valid_columns()
+	child_doctypes = descendant_doctypes(doctype, include_computed=False)
+	valid_column_map = {dt: frappe.get_meta(dt).get_valid_columns() for dt in (doctype, *child_doctypes)}
 
 	documents = iter(documents)
 	while document_batch := list(itertools.islice(documents, chunk_size)):
+		rows_by_doctype = defaultdict(list)
+		for doc in document_batch:
+			for row in doc.get_all_children():
+				rows_by_doctype[row.doctype].append(row)
+
 		values_map = {
 			doctype: _document_values_generator(document_batch, valid_column_map[doctype]),
 		}
-
-		for child_table in child_table_fields:
-			values_map[child_table.options] = _document_values_generator(
-				[
-					ch_doc
-					for ch_doc in (
-						child_docs for doc in document_batch for child_docs in doc.get(child_table.fieldname)
-					)
-				],
-				valid_column_map[child_table.options],
+		for child_doctype in child_doctypes:
+			values_map[child_doctype] = _document_values_generator(
+				rows_by_doctype[child_doctype], valid_column_map[child_doctype]
 			)
 
 		for dt, docs in values_map.items():
@@ -4376,7 +4399,7 @@ class LazyDocument:
 				# Not fetched, can't possibly change so no need to update
 				continue
 			for doc in self.get(fieldname):
-				doc.db_update()
+				doc.db_update_all()
 
 	@override
 	def init_child_tables(self):
@@ -4398,6 +4421,7 @@ class LazyChildTable:
 		assert fieldname not in __dict, "Descriptor should not override existing values"
 		__dict[fieldname] = []
 		children = doc._load_child_table_from_db(fieldname, self.doctype) or []
+		load_descendants({self.doctype: children})
 		# Update __dict__ and convert to Document objects
 		doc.extend(fieldname, children)
 		return __dict[fieldname]

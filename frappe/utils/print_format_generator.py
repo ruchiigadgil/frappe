@@ -152,6 +152,11 @@ def get_qr_code(value: str) -> str:
 	return "data:image/svg+xml;base64," + base64.b64encode(stream.getvalue()).decode()
 
 
+def get_nested_rows(rows, fieldname) -> list:
+	"""Every row of the `fieldname` table inside each of `rows`."""
+	return [child for row in rows for child in row.get(fieldname) or []]
+
+
 DATE_FIELDTYPES = ("Date", "Datetime")
 
 
@@ -968,7 +973,14 @@ class PrintFormatGenerator:
 			table_columns = df["table_columns"]
 			if not isinstance(table_columns, list):
 				table_columns = []
-			return {**df, "table_columns": [c for c in table_columns if isinstance(c, dict)]}
+			nested_tables = df.get("nested_tables")
+			if not isinstance(nested_tables, list):
+				nested_tables = []
+			return {
+				**df,
+				"table_columns": [c for c in table_columns if isinstance(c, dict)],
+				"nested_tables": [clean_field(t) for t in nested_tables if isinstance(t, dict)],
+			}
 
 		sections = layout.get("sections")
 		layout["sections"] = (
@@ -1051,39 +1063,66 @@ class PrintFormatGenerator:
 							for mf in col["merged_fields"]
 							if self.has_field_access(child, child_meta, mf.get("fieldname"))
 						]
+				self.apply_nested_table_access(df, rows)
 		return layout
+
+	def apply_nested_table_access(self, df, rows):
+		"""Drop the tables inside `rows`, and their columns, that the user cannot read."""
+		row, row_meta = rows[0], rows[0].meta
+		kept = []
+		for nested in df.get("nested_tables") or []:
+			if not self.has_field_access(row, row_meta, nested.get("fieldname")):
+				continue
+			if nested_rows := get_nested_rows(rows, nested.get("fieldname")):
+				child, child_meta = nested_rows[0], nested_rows[0].meta
+				nested["table_columns"] = [
+					col
+					for col in nested.get("table_columns") or []
+					if self.has_field_access(child, child_meta, col.get("fieldname"))
+				]
+				self.apply_nested_table_access(nested, nested_rows)
+			kept.append(nested)
+		df["nested_tables"] = kept
 
 	def prune_table_columns(self, layout):
 		"""Drop table columns that fail their column_condition (doc-scoped) or that are
 		empty across all rows, then renormalize widths. A bad condition fails open."""
-		from frappe.www.printview import column_has_value
-
 		eval_locals = {"doc": self.doc, "print_settings": self.print_settings}
 		for column in iter_layout_columns(layout):
 			for df in column.get("fields", []):
 				if df.get("fieldtype") != "Table" or not df.get("table_columns"):
 					continue
 				rows = df.get("_rows") if df.get("_rows") is not None else self.doc.get(df.get("fieldname"))
-				rows = rows or []
-				kept = []
-				for col in df["table_columns"]:
-					if not self.column_condition_met(col, eval_locals):
-						continue
-					if (
-						rows
-						and col.get("fieldname") != "idx"
-						and col.get("fieldtype") != "Blank"
-						and not column_has_value(rows, col.get("fieldname"), frappe._dict(col))
-					):
-						continue
-					kept.append(col)
-				total = sum(col.get("width") or 0 for col in kept)
-				if total:
-					for col in kept:
-						if col.get("width"):
-							col["width"] = round(col["width"] / total * 100, 2)
-				df["table_columns"] = kept
+				self.prune_columns_of_table(df, rows or [], eval_locals)
 		return layout
+
+	def prune_columns_of_table(self, df, rows, eval_locals):
+		from frappe.www.printview import column_has_value
+
+		kept = []
+		for col in df["table_columns"]:
+			if not self.column_condition_met(col, eval_locals):
+				continue
+			if (
+				rows
+				and col.get("fieldname") != "idx"
+				and col.get("fieldtype") != "Blank"
+				and not column_has_value(rows, col.get("fieldname"), frappe._dict(col))
+			):
+				continue
+			kept.append(col)
+		total = sum(col.get("width") or 0 for col in kept)
+		if total:
+			for col in kept:
+				if col.get("width"):
+					col["width"] = round(col["width"] / total * 100, 2)
+		df["table_columns"] = kept
+
+		for nested in df.get("nested_tables") or []:
+			if nested.get("table_columns"):
+				self.prune_columns_of_table(
+					nested, get_nested_rows(rows, nested.get("fieldname")), eval_locals
+				)
 
 	def eval_condition(self, condition, eval_locals, where):
 		"""Evaluate a visibility condition. A broken expression keeps the thing

@@ -190,25 +190,39 @@ def get_children_data(doctype, meta):
 	"""
 	all_children = frappe._dict()
 	child_search_fields = frappe._dict()
+	collect_children_data(doctype, meta, None, all_children, child_search_fields)
+	return all_children, child_search_fields
 
+
+def collect_children_data(doctype, meta, root_of, all_children, child_search_fields):
+	"""Group the rows of every table below `doctype` by their root document's name.
+
+	`root_of` maps a row name of `doctype` to its root name; None means `doctype` is the root."""
 	for child in meta.get_table_fields():
 		child_meta = frappe.get_meta(child.options)
 		search_fields = child_meta.get_global_search_fields()
+		has_nested_tables = bool(child_meta.get_table_fields())
+		if not (search_fields or has_nested_tables):
+			continue
+
+		child_records = frappe.get_all(
+			child.options,
+			fields=[*get_selected_fields(child_meta, search_fields), "name"],
+			filters={"docstatus": ["!=", 2], "parenttype": doctype},
+		)
+		roots = {}
+		for record in child_records:
+			root = record.parent if root_of is None else root_of.get(record.parent)
+			if root is None:
+				continue
+			roots[record.name] = root
+			if search_fields:
+				all_children.setdefault(root, frappe._dict()).setdefault(child.options, []).append(record)
+
 		if search_fields:
 			child_search_fields.setdefault(child.options, search_fields)
-			child_fieldnames = get_selected_fields(child_meta, search_fields)
-			child_records = frappe.get_all(
-				child.options,
-				fields=child_fieldnames,
-				filters={"docstatus": ["!=", 2], "parenttype": doctype},
-			)
-
-			for record in child_records:
-				all_children.setdefault(record.parent, frappe._dict()).setdefault(child.options, []).append(
-					record
-				)
-
-	return all_children, child_search_fields
+		if has_nested_tables:
+			collect_children_data(child.options, child_meta, roots, all_children, child_search_fields)
 
 
 def insert_values_for_multiple_docs(all_contents):
@@ -260,15 +274,7 @@ def update_global_search(doc):
 		if doc.get(field.fieldname) and field.fieldtype not in frappe.model.table_fields
 	]
 
-	# Get children
-	for child in doc.meta.get_table_fields():
-		for d in doc.get(child.fieldname):
-			if d.parent == doc.name:
-				content.extend(
-					get_formatted_value(d.get(field.fieldname), field)
-					for field in d.meta.get_global_search_fields()
-					if d.get(field.fieldname)
-				)
+	content.extend(get_children_search_content(doc))
 	if content:
 		published = 0
 		if hasattr(doc, "is_website_published") and doc.meta.allow_guest_to_view:
@@ -287,6 +293,20 @@ def update_global_search(doc):
 		)
 
 		sync_value_in_queue(value)
+
+
+def get_children_search_content(doc):
+	content = []
+	for d in doc.get_direct_children():
+		if d.parent != doc.name:
+			continue
+		content.extend(
+			get_formatted_value(d.get(field.fieldname), field)
+			for field in d.meta.get_global_search_fields()
+			if d.get(field.fieldname)
+		)
+		content.extend(get_children_search_content(d))
+	return content
 
 
 def update_global_search_for_all_web_pages():

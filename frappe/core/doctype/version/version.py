@@ -152,9 +152,11 @@ def get_diff(old, new, for_child=False, compare_cancelled=False, include_ignored
 		updater_reference=updater_reference,
 	)
 
+	old_row_name_field = "name"
 	if not for_child:
 		amended_from = new.get("amended_from")
-		old_row_name_field = "_amended_from" if (amended_from and amended_from == old.name) else "name"
+		if amended_from and amended_from == old.name:
+			old_row_name_field = "_amended_from"
 
 	for df in new.meta.fields:
 		if df.fieldtype in FIELDTYPES_TO_IGNORE or getattr(df, "is_virtual", False):
@@ -171,7 +173,7 @@ def get_diff(old, new, for_child=False, compare_cancelled=False, include_ignored
 			if old_value is None and new_value == "":
 				new_value = None
 
-		if not for_child and df.fieldtype in table_fields:
+		if df.fieldtype in table_fields:
 			old_rows_by_name = {}
 			for d in old_value:
 				old_rows_by_name[d.name] = d
@@ -197,6 +199,8 @@ def get_diff(old, new, for_child=False, compare_cancelled=False, include_ignored
 					)
 					if diff and diff.changed:
 						out.row_changed.append((df.fieldname, i, d.name, diff.changed))
+					if diff:
+						add_nested_changes(out, diff, df.fieldname)
 				else:
 					out.added.append([df.fieldname, get_row_data(d)])
 
@@ -284,3 +288,12 @@ def _should_generate_html_diff(old_str: str, new_str: str) -> bool:
 def _as_string(value: str | None) -> str:
 	"""Convert the given value to a string."""
 	return cstr(value) if value is not None else ""
+
+
+def add_nested_changes(out, diff, fieldname):
+	"""Record table changes inside a child row under a dotted path, like `items.serials`."""
+	for key in ("added", "removed"):
+		out[key].extend([f"{fieldname}.{path}", row] for path, row in diff[key])
+	out.row_changed.extend(
+		(f"{fieldname}.{path}", idx, name, changes) for path, idx, name, changes in diff.row_changed
+	)

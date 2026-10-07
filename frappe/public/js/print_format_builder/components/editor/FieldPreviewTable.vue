@@ -27,64 +27,71 @@
 		</thead>
 		<tbody>
 			<tr
-				v-for="(row, i) in (preview_doc[df.fieldname] || []).slice(0, 4)"
-				:key="i"
-				:class="i % 2 === 0 ? 'odd' : 'even'"
+				v-for="{ row, i, nested } in body_rows"
+				:key="nested ? `${i}-${nested.fieldname}` : i"
+				:class="nested ? 'table-row nested-table-row' : i % 2 === 0 ? 'odd' : 'even'"
 			>
-				<td
-					v-for="col in df.table_columns"
-					:key="col.fieldname"
-					class="column-value"
-					:class="{ 'column-value--merged': has_merge(col) }"
-					:data-fieldtype="col.fieldtype"
-					:data-fieldname="col.fieldname"
-					:style="(col.width ? `width: ${col.width}%; ` : '') + cell_style(df)"
-				>
-					<!-- Merged cell: image (if any) floats left, text lines stack -->
-					<div v-if="has_merge(col)" class="cell-merged">
-						<template v-if="image_merge(col)">
+				<td v-if="nested" class="column-value" :colspan="df.table_columns.length">
+					<FieldPreviewNestedTable :df="nested" :rows="row[nested.fieldname]" />
+				</td>
+				<template v-else>
+					<td
+						v-for="col in df.table_columns"
+						:key="col.fieldname"
+						class="column-value"
+						:class="{ 'column-value--merged': has_merge(col) }"
+						:data-fieldtype="col.fieldtype"
+						:data-fieldname="col.fieldname"
+						:style="(col.width ? `width: ${col.width}%; ` : '') + cell_style(df)"
+					>
+						<!-- Merged cell: image (if any) floats left, text lines stack -->
+						<div v-if="has_merge(col)" class="cell-merged">
+							<template v-if="image_merge(col)">
+								<img
+									v-if="cell_image(col, row)"
+									:src="cell_image(col, row)"
+									class="cell-thumb-img"
+									:style="thumb_box(col)"
+									:alt="col.label || col.fieldname"
+								/>
+								<span v-else class="cell-thumb" :style="thumb(col, row).style">{{
+									thumb(col, row).abbr
+								}}</span>
+							</template>
+							<div
+								class="cell-lines"
+								:class="{
+									'cell-lines--horizontal': col.merge_direction === 'horizontal',
+								}"
+							>
+								<div
+									v-for="(mf, mi) in text_merges(col)"
+									:key="mi"
+									class="cell-line"
+									:class="`cell-line--${mf.style || 'primary'}`"
+									v-html="merged_line(row, i, mf)"
+								></div>
+							</div>
+						</div>
+						<!-- Single (default) -->
+						<template v-else>
 							<img
-								v-if="cell_image(col, row)"
-								:src="cell_image(col, row)"
-								class="cell-thumb-img"
-								:style="thumb_box(col)"
+								v-if="
+									is_image_field(col, row[col.fieldname]) && row[col.fieldname]
+								"
+								:src="row[col.fieldname]"
+								class="preview-table-img"
 								:alt="col.label || col.fieldname"
 							/>
-							<span v-else class="cell-thumb" :style="thumb(col, row).style">{{
-								thumb(col, row).abbr
-							}}</span>
-						</template>
-						<div
-							class="cell-lines"
-							:class="{
-								'cell-lines--horizontal': col.merge_direction === 'horizontal',
-							}"
-						>
 							<div
-								v-for="(mf, mi) in text_merges(col)"
-								:key="mi"
-								class="cell-line"
-								:class="`cell-line--${mf.style || 'primary'}`"
-								v-html="merged_line(row, i, mf)"
+								v-else-if="cell_server_html(i, col)"
+								class="preview-table-html"
+								v-html="cell_server_html(i, col)"
 							></div>
-						</div>
-					</div>
-					<!-- Single (default) -->
-					<template v-else>
-						<img
-							v-if="is_image_field(col, row[col.fieldname]) && row[col.fieldname]"
-							:src="row[col.fieldname]"
-							class="preview-table-img"
-							:alt="col.label || col.fieldname"
-						/>
-						<div
-							v-else-if="cell_server_html(i, col)"
-							class="preview-table-html"
-							v-html="cell_server_html(i, col)"
-						></div>
-						<span v-else>{{ format_cell(row, col) }}</span>
-					</template>
-				</td>
+							<span v-else>{{ format_cell(row, col) }}</span>
+						</template>
+					</td>
+				</template>
 			</tr>
 		</tbody>
 		<!-- after tbody (HTML5 order): user styles that remap tfoot's display can
@@ -113,10 +120,22 @@
 import { computed, inject } from "vue";
 import { useColumnResize } from "../../composables/useColumnResize";
 import { useFieldFormat } from "../../composables/useFieldFormat";
+import { nested_tables_in_row } from "../../utils";
+import FieldPreviewNestedTable from "./FieldPreviewNestedTable.vue";
 
 const props = defineProps(["df"]);
 const store = inject("$store");
 const preview_doc = computed(() => store.preview_doc.value);
+
+// one entry per printed row: each data row, then the tables nested inside it
+const body_rows = computed(() =>
+	(preview_doc.value?.[props.df.fieldname] || [])
+		.slice(0, 4)
+		.flatMap((row, i) => [
+			{ row, i },
+			...nested_tables_in_row(props.df, row).map((nested) => ({ row, i, nested })),
+		])
+);
 
 const {
 	cell_style,

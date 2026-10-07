@@ -954,15 +954,7 @@ def get_field_currency(df, doc=None):
 				if currency:
 					ref_docname = doc.name
 				else:
-					if frappe.get_meta(doc.parenttype).has_field(df.get("options")):
-						# only get_value if parent has currency field
-						currency = frappe.db.get_value(doc.parenttype, doc.parent, df.get("options"))
-						if not currency:
-							# Parent may not be in DB yet (new document being saved).
-							# Use the in-memory parent document reference if available.
-							parent = getattr(doc, "parent_doc", None)
-							if parent:
-								currency = parent.get(df.get("options"))
+					currency = get_parent_currency(doc, df.get("options"))
 
 		if currency:
 			frappe.local.field_currency.setdefault((doc.doctype, ref_docname), frappe._dict()).setdefault(
@@ -972,6 +964,21 @@ def get_field_currency(df, doc=None):
 	return frappe.local.field_currency.get((doc.doctype, doc.name), {}).get(df.fieldname) or (
 		doc.get("parent") and frappe.local.field_currency.get((doc.doctype, doc.parent), {}).get(df.fieldname)
 	)
+
+
+def get_parent_currency(row, fieldname):
+	"""Currency from the nearest parent of a child row that has `fieldname`."""
+	while row.get("parenttype"):
+		parent = getattr(row, "parent_doc", None)
+		if frappe.get_meta(row.parenttype).has_field(fieldname):
+			# the parent may not be in the DB yet (new document being saved), so fall back to it in memory
+			return frappe.db.get_value(row.parenttype, row.parent, fieldname) or (
+				parent and parent.get(fieldname)
+			)
+		if not parent:
+			return None
+		row = parent
+	return None
 
 
 def get_field_precision(df, doc=None, currency=None):
