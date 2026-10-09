@@ -231,6 +231,7 @@
 			ref="file_browser"
 			v-if="show_file_browser && !disable_file_browser"
 			@hide-browser="show_file_browser = false"
+			@select="add_library_file"
 		/>
 		<WebLink ref="web_link" v-if="show_web_link" @hide-web-link="show_web_link = false" />
 	</div>
@@ -467,6 +468,22 @@ function add_files(file_array) {
 		}
 	}
 }
+function add_library_file(node) {
+	files.value = files.value.concat({
+		name: node.filename,
+		file_name: node.filename,
+		file_url: node.file_url,
+		library_file_name: node.value,
+		doc: null,
+		progress: 0,
+		total: 0,
+		failed: false,
+		request_succeeded: false,
+		error_message: null,
+		uploading: false,
+	});
+	show_file_browser.value = false;
+}
 function check_restrictions(file) {
 	let { max_file_size, allowed_file_types = [] } = props.restrictions;
 
@@ -559,12 +576,13 @@ function upload_via_web_link() {
 	});
 }
 function return_as_dataurl() {
-	let promises = files.value.map((file) =>
-		frappe.dom.file_to_base64(file.file_obj).then((dataurl) => {
+	let promises = files.value.map((file) => {
+		if (!file.file_obj) return props.on_success?.(file);
+		return frappe.dom.file_to_base64(file.file_obj).then((dataurl) => {
 			file.dataurl = dataurl;
 			props.on_success && props.on_success(file);
-		})
-	);
+		});
+	});
 	close_dialog.value = true;
 	return Promise.all(promises);
 }

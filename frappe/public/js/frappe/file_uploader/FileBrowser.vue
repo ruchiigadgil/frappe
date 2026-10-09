@@ -31,7 +31,7 @@ import { onMounted, ref } from "vue";
 import TreeNode from "./TreeNode.vue";
 
 // emits
-let emit = defineEmits(["hide-browser"]);
+let emit = defineEmits(["hide-browser", "select"]);
 
 // variables
 let node = ref({
@@ -85,6 +85,7 @@ function load_more(node) {
 function select_node(node) {
 	if (node.is_leaf) {
 		selected_node.value = node;
+		emit("select", node);
 	}
 }
 function get_files_in_folder(folder, start) {
@@ -168,7 +169,8 @@ defineExpose({ selected_node });
 <style scoped>
 .file-browser-list {
 	height: 300px;
-	overflow: hidden;
+	display: flex;
+	flex-direction: column;
 	margin-top: 10px;
 }
 
@@ -177,10 +179,10 @@ defineExpose({ selected_node });
 }
 
 .tree {
+	flex: 1 1 auto;
+	min-height: 0;
 	overflow: auto;
-	height: 100%;
 	padding-left: 0;
 	padding-right: 0;
-	padding-bottom: 4rem;
 }
 </style>

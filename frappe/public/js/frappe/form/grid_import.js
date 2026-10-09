@@ -203,12 +203,8 @@ export default class GridImport {
 		return this.file_uploader?.uploader?.files?.length || 0;
 	}
 
-	has_library_selection() {
-		return Boolean(this.panels.upload.find(".tree-link.active .file-doc-link").length);
-	}
-
 	has_file_selection() {
-		return Boolean(this.uploaded_file_count() || this.has_library_selection());
+		return Boolean(this.uploaded_file_count());
 	}
 
 	sheet_url() {
