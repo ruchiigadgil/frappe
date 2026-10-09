@@ -20,10 +20,14 @@ test.describe("Grid", () => {
 
 	const enable_bulk_edit = (page, enabled = true) =>
 		page.evaluate((enabled) => {
-			const grid = cur_frm.get_field("phone_nos").grid;
-			grid.meta.allow_bulk_edit = enabled;
-			grid.refresh_edit_rows_button();
+			cur_frm.get_field("phone_nos").grid.meta.allow_bulk_edit = enabled;
 		}, enabled);
+
+	const open_row_actions = (table) =>
+		table.locator(".grid-selection-bar").getByRole("button", { name: "Actions" }).click();
+
+	const row_action = (page, label) =>
+		page.locator('.es-menu [role="menuitem"]', { hasText: label });
 
 	test("update docfield property using update_docfield_property", async ({ page }) => {
 		const table = get_table(page);
@@ -97,7 +101,7 @@ test.describe("Grid", () => {
 		}
 	});
 
-	test("shows edit button only when child table allow_bulk_edit is enabled", async ({
+	test("shows edit action only when child table allow_bulk_edit is enabled", async ({
 		page,
 	}) => {
 		const table = get_table(page);
@@ -105,11 +109,14 @@ test.describe("Grid", () => {
 		await enable_bulk_edit(page, false);
 
 		await table.locator('.grid-row[data-idx="1"] .grid-row-check').click();
-		await expect(table.locator(".grid-edit-rows")).toHaveClass(/(^|\s)hidden(\s|$)/);
+		await open_row_actions(table);
+		await expect(row_action(page, "Edit")).toHaveCount(0);
+		await page.keyboard.press("Escape");
 
 		await enable_bulk_edit(page, true);
 
-		await expect(table.locator(".grid-edit-rows")).not.toHaveClass(/(^|\s)hidden(\s|$)/);
+		await open_row_actions(table);
+		await expect(row_action(page, "Edit")).toBeVisible();
 	});
 
 	test("bulk edit updates only selected child rows", async ({ page }) => {
@@ -132,7 +139,8 @@ test.describe("Grid", () => {
 		expect(phone_field_label).toBeTruthy();
 
 		await table.locator('.grid-row[data-idx="1"] .grid-row-check').click();
-		await table.locator(".grid-edit-rows").click();
+		await open_row_actions(table);
+		await row_action(page, "Edit").click();
 		await page.waitForFunction(() => window.cur_dialog);
 
 		await page.evaluate(
@@ -160,7 +168,6 @@ test.describe("Grid", () => {
 		await page.evaluate(() => {
 			const grid = cur_frm.get_field("phone_nos").grid;
 			grid.meta.allow_bulk_edit = true;
-			grid.refresh_edit_rows_button();
 
 			const phone_df = grid.docfields.find((df) => df.fieldname === "phone");
 			phone_df.allow_on_submit = 1;
@@ -168,7 +175,8 @@ test.describe("Grid", () => {
 		});
 
 		await table.locator('.grid-row[data-idx="1"] .grid-row-check').click();
-		await table.locator(".grid-edit-rows").click();
+		await open_row_actions(table);
+		await row_action(page, "Edit").click();
 
 		const dialog = page.locator(".modal-dialog:visible");
 		await expect(dialog.locator('.frappe-control[data-fieldname="field"]')).toBeVisible();
@@ -183,12 +191,12 @@ test.describe("Grid", () => {
 
 		await row_check.click();
 
-		await expect(table.locator(".grid-add-row")).toHaveClass(/(^|\s)hidden(\s|$)/);
-		await expect(table.locator(".grid-add-multiple-rows")).toHaveClass(/(^|\s)hidden(\s|$)/);
+		await expect(table.locator(".grid-add-row")).toBeHidden();
+		await expect(table.locator(".grid-add-multiple-rows")).toBeHidden();
 
 		await row_check.click();
 
-		await expect(table.locator(".grid-add-row")).not.toHaveClass(/(^|\s)hidden(\s|$)/);
+		await expect(table.locator(".grid-add-row")).toBeVisible();
 	});
 
 	test("parks the Link dropdown on the grid and puts it back when it closes", async ({

@@ -43,7 +43,12 @@ test.describe("Grid Pagination", () => {
 		await expect(table.locator(".current-page-number")).toHaveValue("21");
 		await expect(table.locator(".total-page-number")).toContainText("21");
 		await table.locator(".grid-body .grid-row .grid-row-check").click();
-		await table.getByRole("button", { name: "Delete row", exact: true }).click();
+		await table
+			.locator(".grid-selection-bar")
+			.getByRole("button", { name: "Actions" })
+			.click();
+		await page.locator('.es-menu [role="menuitem"]', { hasText: "Delete" }).click();
+		await page.locator(".modal-dialog:visible").getByRole("button", { name: "Yes" }).click();
 		await expect(table.locator(".grid-body .row-index").last()).toContainText("1000");
 		await expect(table.locator(".current-page-number")).toHaveValue("20");
 		await expect(table.locator(".total-page-number")).toContainText("20");

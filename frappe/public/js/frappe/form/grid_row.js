@@ -86,7 +86,7 @@ export default class GridRow {
 		this.wrapper
 			.find(".grid-row-check")
 			.prop("checked", this.doc ? !!this.doc.__checked : false);
-		this.grid.debounced_refresh_remove_rows_button();
+		this.grid.selection_bar.debounced_refresh();
 	}
 	remove() {
 		if (this.grid.is_editable()) {

@@ -1742,7 +1742,7 @@ frappe.ui.form.on("Data Import", {
 		}
 
 		grid.setup_toolbar?.();
-		grid.refresh_remove_rows_button?.();
+		grid.selection_bar?.refresh();
 		frm.events.apply_mapping_target_fields(frm);
 		frm.events.apply_value_mappings_mobile_layout(frm);
 	},
