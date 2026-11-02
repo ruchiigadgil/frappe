@@ -40,14 +40,14 @@ def get_files_in_folder(folder: str, start: int = 0, page_length: int = 20) -> d
 	attachment_folder = frappe.db.get_value(
 		"File",
 		"Home/Attachments",
-		["name", "file_name", "file_url", "is_folder", "modified"],
+		["name", "file_name", "file_url", "is_folder", "modified", "file_size"],
 		as_dict=1,
 	)
 
 	files = frappe.get_list(
 		"File",
 		{"folder": folder},
-		["name", "file_name", "file_url", "is_folder", "modified"],
+		["name", "file_name", "file_url", "is_folder", "modified", "file_size"],
 		start=start,
 		page_length=page_length + 1,
 	)
@@ -66,7 +66,7 @@ def get_files_by_search_text(text: str) -> list[dict]:
 	text = "%" + cstr(text).lower() + "%"
 	return frappe.get_list(
 		"File",
-		fields=["name", "file_name", "file_url", "is_folder", "modified"],
+		fields=["name", "file_name", "file_url", "is_folder", "modified", "file_size"],
 		filters={"is_folder": False},
 		or_filters={
 			"file_name": ("like", text),

@@ -77,7 +77,7 @@
 				{{ file.error_message }}
 			</div>
 			<div
-				v-if="!file.private && !file.error_message && !uploaded && !file.failed"
+				v-if="show_private_checkbox && !file.private && !file.error_message"
 				class="alert alert-warning mb-0"
 				role="alert"
 			>
@@ -117,8 +117,15 @@ let src = ref(null);
 let optimize = ref(props.file.optimize);
 
 // computed
+let file_type = computed(() => {
+	return props.file.file_obj?.type || "";
+});
 let file_size = computed(() => {
-	return frappe.form.formatters.FileSize(props.file.file_obj.size);
+	if (props.file.file_obj) return frappe.form.formatters.FileSize(props.file.file_obj.size);
+	return props.file.file_size ? frappe.form.formatters.FileSize(props.file.file_size) : "";
+});
+let is_external = computed(() => {
+	return !props.file.file_obj && /^https?:\/\//.test(props.file.file_url || "");
 });
 let is_private = computed(() => {
 	return props.file.doc ? props.file.doc.is_private : props.file.private;
@@ -127,15 +134,19 @@ let uploaded = computed(() => {
 	return props.file.request_succeeded;
 });
 let is_image = computed(() => {
-	return props.file.file_obj.type.startsWith("image");
+	if (!props.file.file_obj) {
+		return !is_external.value && frappe.utils.is_image_file(props.file.file_url);
+	}
+	return file_type.value.startsWith("image");
 });
 let is_pdf = computed(() => {
-	return props.file.file_obj.type == "application/pdf";
+	return file_type.value == "application/pdf";
 });
 let allow_toggle_optimize = computed(() => {
-	let is_svg = props.file.file_obj.type == "image/svg+xml";
+	let is_svg = file_type.value == "image/svg+xml";
 	return (
 		props.allow_toggle_optimize &&
+		Boolean(props.file.file_obj) &&
 		((is_image.value && !is_svg) || is_pdf.value) &&
 		!uploaded.value &&
 		!props.file.failed
@@ -143,7 +154,7 @@ let allow_toggle_optimize = computed(() => {
 });
 
 let show_private_checkbox = computed(() => {
-	return !uploaded.value && !props.file.failed;
+	return Boolean(props.file.file_obj) && !uploaded.value && !props.file.failed;
 });
 
 let is_cropable = computed(() => {
@@ -152,7 +163,7 @@ let is_cropable = computed(() => {
 		!uploaded.value &&
 		!props.file.uploading &&
 		!props.file.failed &&
-		croppable_types.includes(props.file.file_obj.type)
+		croppable_types.includes(file_type.value)
 	);
 });
 let progress = computed(() => {
@@ -166,7 +177,9 @@ let progress = computed(() => {
 // mounted
 onMounted(() => {
 	if (is_image.value) {
-		if (window.FileReader) {
+		if (!props.file.file_obj) {
+			src.value = props.file.file_url;
+		} else if (window.FileReader) {
 			let fr = new FileReader();
 			fr.onload = () => (src.value = fr.result);
 			fr.readAsDataURL(props.file.file_obj);

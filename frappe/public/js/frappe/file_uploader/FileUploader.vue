@@ -231,6 +231,7 @@
 			ref="file_browser"
 			v-if="show_file_browser && !disable_file_browser"
 			@hide-browser="show_file_browser = false"
+			@select="add_library_file"
 		/>
 		<WebLink ref="web_link" v-if="show_web_link" @hide-web-link="show_web_link = false" />
 	</div>
@@ -386,8 +387,9 @@ function toggle_image_cropper(index) {
 }
 function toggle_all_private() {
 	let flag;
-	let private_values = files.value.filter((file) => file.private);
-	if (private_values.length < files.value.length) {
+	let device_files = files.value.filter((file) => !file.library_file_name);
+	let private_values = device_files.filter((file) => file.private);
+	if (private_values.length < device_files.length) {
 		// there are some private and some public
 		// set all to private
 		flag = true;
@@ -396,7 +398,7 @@ function toggle_all_private() {
 		flag = false;
 	}
 	files.value = files.value.map((file) => {
-		file.private = flag;
+		if (!file.library_file_name) file.private = flag;
 		return file;
 	});
 }
@@ -466,6 +468,37 @@ function add_files(file_array) {
 			toggle_image_cropper(0);
 		}
 	}
+}
+function add_library_file(node) {
+	show_file_browser.value = false;
+	if (!is_allowed_library_file(node.filename)) {
+		frappe.show_alert({
+			message: __('File "{0}" was skipped because of invalid file type', [node.filename]),
+			indicator: "orange",
+		});
+		return;
+	}
+	files.value = files.value.concat({
+		name: node.filename,
+		file_name: node.filename,
+		file_url: node.file_url,
+		file_size: node.file_size,
+		library_file_name: node.value,
+		doc: null,
+		progress: 0,
+		total: 0,
+		failed: false,
+		request_succeeded: false,
+		error_message: null,
+		uploading: false,
+	});
+}
+function is_allowed_library_file(filename) {
+	let { allowed_file_types = [] } = props.restrictions;
+	if (!allowed_file_types.length || allowed_file_types.some((type) => type.includes("/"))) {
+		return true;
+	}
+	return allowed_file_types.some((type) => filename.toLowerCase().endsWith(type.toLowerCase()));
 }
 function check_restrictions(file) {
 	let { max_file_size, allowed_file_types = [] } = props.restrictions;
@@ -559,12 +592,13 @@ function upload_via_web_link() {
 	});
 }
 function return_as_dataurl() {
-	let promises = files.value.map((file) =>
-		frappe.dom.file_to_base64(file.file_obj).then((dataurl) => {
+	let promises = files.value.map((file) => {
+		if (!file.file_obj) return props.on_success?.(file);
+		return frappe.dom.file_to_base64(file.file_obj).then((dataurl) => {
 			file.dataurl = dataurl;
 			props.on_success && props.on_success(file);
-		})
-	);
+		});
+	});
 	close_dialog.value = true;
 	return Promise.all(promises);
 }

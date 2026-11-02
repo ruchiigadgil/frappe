@@ -98,11 +98,15 @@ class FileUploader {
 		watch(
 			() => this.uploader.files,
 			(files) => {
-				let all_private = files.every((file) => file.private);
+				let device_files = files.filter((file) => !file.library_file_name);
+				let all_private = device_files.every((file) => file.private);
 				if (this.dialog && this.can_toggle_private) {
 					this.dialog.set_secondary_action_label(
 						all_private ? __("Set all public") : __("Set all private")
 					);
+					this.dialog
+						.get_secondary_btn()
+						.toggleClass("hide", files.length > 0 && !device_files.length);
 				}
 			},
 			{ deep: true }
