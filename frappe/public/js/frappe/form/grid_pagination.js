@@ -14,16 +14,16 @@ export default class GridPagination {
 
 	render_pagination() {
 		if (this.grid.data.length <= this.page_length) {
-			this.wrapper.find(".grid-pagination").html("");
+			this.grid.find_own(".grid-pagination").html("");
 		} else {
 			let $pagination_template = this.get_pagination_html();
-			this.wrapper.find(".grid-pagination").html($pagination_template);
-			this.prev_page_button = this.wrapper.find(".prev-page");
-			this.next_page_button = this.wrapper.find(".next-page");
-			this.$page_number = this.wrapper.find(".current-page-number");
-			this.$total_pages = this.wrapper.find(".total-page-number");
-			this.first_page_button = this.wrapper.find(".first-page");
-			this.last_page_button = this.wrapper.find(".last-page");
+			this.grid.find_own(".grid-pagination").html($pagination_template);
+			this.prev_page_button = this.grid.find_own(".prev-page");
+			this.next_page_button = this.grid.find_own(".next-page");
+			this.$page_number = this.grid.find_own(".current-page-number");
+			this.$total_pages = this.grid.find_own(".total-page-number");
+			this.first_page_button = this.grid.find_own(".first-page");
+			this.last_page_button = this.grid.find_own(".last-page");
 
 			this.bind_pagination_events();
 		}
@@ -184,7 +184,7 @@ export default class GridPagination {
 			result_length > 0 &&
 			this.grid.data.slice(start_index, result_length).every((row) => row.__checked);
 
-		this.wrapper.find(".grid-heading-row .grid-row-check").prop("checked", all_selected);
+		this.grid.find_own(".grid-heading-row .grid-row-check").prop("checked", all_selected);
 	}
 
 	go_to_last_page_to_add_row() {

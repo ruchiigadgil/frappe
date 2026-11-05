@@ -7,7 +7,7 @@ export default class GridRowForm {
 		var me = this;
 		this.make_form();
 		this.form_area.empty();
-		frappe.utils.scroll_to(0, false, 0, this.wrapper.find(".grid-form-body"));
+		frappe.utils.scroll_to(0, false, 0, this.form_area);
 
 		this.layout = new frappe.ui.form.Layout({
 			fields: this.row.docfields,
@@ -34,6 +34,7 @@ export default class GridRowForm {
 		}
 
 		this.toggle_add_delete_button_display(this.wrapper);
+		this.render_breadcrumbs();
 
 		this.row.grid.open_grid_row = this;
 
@@ -42,13 +43,14 @@ export default class GridRowForm {
 	make_form() {
 		if (!this.form_area) {
 			let template = `<div class="grid-form-heading">
+				<div class="grid-form-breadcrumbs hidden"></div>
 				<div class="toolbar grid-header-toolbar">
 					<span class="panel-title">
 						${__("Editing Row")} #<span class="grid-form-row-index"></span></span>
 					<span class="row-actions">
 						${frappe.ui.button.html({
-							icon: "chevron-down",
-							title: __("Collapse"),
+							icon: "x",
+							title: __("Close"),
 							css_class: "pull-right grid-collapse-row",
 						})}
 						${frappe.ui.button.html({
@@ -119,6 +121,40 @@ export default class GridRowForm {
 			me.row.toggle_view();
 			return false;
 		});
+	}
+	render_breadcrumbs() {
+		const $breadcrumbs = this.wrapper
+			.children(".grid-form-heading")
+			.find(".grid-form-breadcrumbs")
+			.empty();
+		const parent_rows = this.get_parent_rows();
+		$breadcrumbs.toggleClass("hidden", !parent_rows.length);
+		if (!parent_rows.length) return;
+
+		const open_rows = [...parent_rows.slice(1), this.row];
+		parent_rows.forEach((row, i) => {
+			$(`<a class="grid-form-breadcrumb">${this.get_table_label(row)} #${row.doc.idx}</a>`)
+				.on("click", () => {
+					open_rows[i].toggle_view(false);
+					return false;
+				})
+				.appendTo($breadcrumbs);
+			$breadcrumbs.append(frappe.utils.icon("chevron-right", "xs"));
+		});
+		$breadcrumbs.append(`<span>${this.get_table_label(this.row)}</span>`);
+	}
+	get_parent_rows() {
+		const rows = [];
+		let $row = this.row.wrapper.parent().closest(".grid-row");
+		while ($row.length) {
+			rows.unshift($row.data("grid_row"));
+			$row = $row.parent().closest(".grid-row");
+		}
+		return rows;
+	}
+	get_table_label(row) {
+		const df = row.grid.df;
+		return frappe.utils.escape_html(__(df.label || frappe.unscrub(df.fieldname)));
 	}
 	toggle_add_delete_button_display($parent) {
 		$parent.find(".row-actions").toggle(this.row.grid.is_editable());

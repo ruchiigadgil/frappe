@@ -72,20 +72,20 @@ export default class GridRow {
 	}
 	set_row_index() {
 		if (this.doc) {
-			this.wrapper
-				.attr("data-name", this.doc.name)
-				.attr("data-idx", this.doc.idx)
-				.find(".row-index span, .grid-form-row-index")
-				.html(this.doc.idx);
+			this.wrapper.attr("data-name", this.doc.name).attr("data-idx", this.doc.idx);
+			this.find_own(".row-index span, .grid-form-row-index").html(this.doc.idx);
 		}
+	}
+	find_own(selector) {
+		return this.wrapper
+			.find(selector)
+			.filter((_, el) => $(el).closest(".grid-row").is(this.wrapper));
 	}
 	select(checked) {
 		this.doc.__checked = checked ? 1 : 0;
 	}
 	refresh_check() {
-		this.wrapper
-			.find(".grid-row-check")
-			.prop("checked", this.doc ? !!this.doc.__checked : false);
+		this.find_own(".grid-row-check").prop("checked", this.doc ? !!this.doc.__checked : false);
 		this.grid.debounced_refresh_remove_rows_button();
 	}
 	remove() {
@@ -1259,6 +1259,7 @@ export default class GridRow {
 
 			if (e.which === ESCAPE && !e.shiftKey) {
 				if (this.doc.__unedited) this.grid.grid_rows[this.doc.idx - 1].remove();
+				else if (this.grid.parent_doc?.parenttype) return;
 				return false;
 			}
 
@@ -1423,20 +1424,20 @@ export default class GridRow {
 				row: this,
 			});
 		}
-		this.grid_form.wrapper.css("display", "block");
+		this.grid_form.wrapper.css("display", "");
 		this.grid_form.render();
 		this.row.toggle(false);
 		// this.form_panel.toggle(true);
 
 		let cannot_add_rows =
 			this.grid.cannot_add_rows || (this.grid.df && this.grid.df.cannot_add_rows);
-		this.wrapper
-			.find(".grid-insert-row-below, .grid-insert-row, .grid-duplicate-row")
-			.toggle(!cannot_add_rows);
+		this.find_own(".grid-insert-row-below, .grid-insert-row, .grid-duplicate-row").toggle(
+			!cannot_add_rows
+		);
 
-		this.wrapper
-			.find(".grid-delete-row")
-			.toggle(!(this.grid.df && this.grid.df.cannot_delete_rows));
+		this.find_own(".grid-delete-row").toggle(
+			!(this.grid.df && this.grid.df.cannot_delete_rows)
+		);
 
 		frappe.dom.freeze("", "grid-form");
 		if (cur_frm) cur_frm.cur_grid = this;

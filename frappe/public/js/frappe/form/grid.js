@@ -175,9 +175,9 @@ export default class Grid {
 		this.set_grid_description();
 		this.set_doc_url();
 
-		frappe.utils.bind_actions_with_object(this.wrapper, this);
+		frappe.utils.bind_actions_with_object(this.find_own(".grid-footer"), this);
 
-		this.form_grid = this.wrapper.find(".form-grid");
+		this.form_grid = this.find_own(".form-grid");
 
 		this.form_grid.on("scroll", (e) => {
 			if ($(e.currentTarget).scrollLeft() > 0) {
@@ -197,8 +197,8 @@ export default class Grid {
 		this.update_idx_and_name();
 
 		this.custom_buttons = {};
-		this.grid_buttons = this.wrapper.find(".grid-buttons");
-		this.grid_custom_buttons = this.wrapper.find(".grid-custom-buttons");
+		this.grid_buttons = this.find_own(".grid-buttons");
+		this.grid_custom_buttons = this.find_own(".grid-custom-buttons");
 		this.remove_rows_button = this.grid_buttons.find(".grid-remove-rows");
 		this.edit_rows_button = this.grid_buttons.find(".grid-edit-rows");
 		this.duplicate_rows_button = this.grid_buttons.find(".grid-duplicate-rows");
@@ -268,13 +268,14 @@ export default class Grid {
 			}
 
 			const $check = $(e.currentTarget);
+			if (!$check.closest(".grid-field").is(this.wrapper)) return;
 			const checked = $check.prop("checked");
 			const is_select_all = $check.parents(".grid-heading-row:first").length !== 0;
 			const docname = $check.parents(".grid-row:first")?.attr("data-name");
 
 			if (is_select_all) {
 				// (un)check all visible checkboxes
-				this.form_grid.find(".grid-row-check").prop("checked", checked);
+				this.find_own(".grid-row-check").prop("checked", checked);
 
 				// set following rows as checked in model
 				let result_length = this.grid_pagination.get_result_length();
@@ -298,11 +299,12 @@ export default class Grid {
 				(this.df && this.df.cannot_add_rows);
 
 			// toggle "Add row" button
-			this.wrapper.find(".grid-add-row").toggleClass("hidden", should_hide_add_buttons);
+			this.find_own(".grid-add-row").toggleClass("hidden", should_hide_add_buttons);
 
-			this.wrapper
-				.find(".grid-add-multiple-rows")
-				.toggleClass("hidden", should_hide_add_buttons || !this.multiple_set);
+			this.find_own(".grid-add-multiple-rows").toggleClass(
+				"hidden",
+				should_hide_add_buttons || !this.multiple_set
+			);
 
 			// update "Delete" and "Duplicate" button labels
 			if (num_selected_rows == 1) {
@@ -407,7 +409,7 @@ export default class Grid {
 
 		frappe.run_serially(tasks);
 
-		this.wrapper.find(".grid-heading-row .grid-row-check:checked:first").prop("checked", 0);
+		this.find_own(".grid-heading-row .grid-row-check:checked").prop("checked", 0);
 		if (selected_children.length == this.grid_pagination.page_length) {
 			this.scroll_to_top();
 		}
@@ -421,7 +423,7 @@ export default class Grid {
 			} else {
 				this.df.data = [];
 			}
-			$(this.parent).find(".rows").empty();
+			this.find_own(".rows").empty();
 			this.grid_rows = [];
 			this.refresh();
 			this.frm &&
@@ -446,7 +448,7 @@ export default class Grid {
 	}
 
 	_any_rows_checked() {
-		return !!this.wrapper.find(".grid-body .grid-row-check:checked:first").length;
+		return !!this.find_own(".grid-body .grid-row-check:checked").length;
 	}
 
 	refresh_remove_rows_button() {
@@ -461,8 +463,7 @@ export default class Grid {
 			!has_checked || this.cannot_add_rows || (this.df && this.df.cannot_add_rows)
 		);
 
-		const all_checked = !!this.wrapper.find(".grid-heading-row .grid-row-check:checked:first")
-			.length;
+		const all_checked = !!this.find_own(".grid-heading-row .grid-row-check:checked").length;
 		const show_delete_all_btn =
 			all_checked && this.data.length > this.get_selected_children().length;
 		this.remove_all_rows_button.toggleClass("hidden", !show_delete_all_btn);
@@ -508,6 +509,12 @@ export default class Grid {
 		100
 	);
 
+	find_own(selector) {
+		return this.wrapper
+			.find(selector)
+			.filter((_, el) => $(el).closest(".grid-field").is(this.wrapper));
+	}
+
 	get_selected() {
 		return (this.data || []).filter((doc) => doc.__checked).map((doc) => doc.name);
 	}
@@ -519,7 +526,7 @@ export default class Grid {
 	_teardown_column_layout() {
 		this.visible_columns = [];
 		this.grid_rows = [];
-		$(this.parent).find(".grid-body .grid-row").remove();
+		this.find_own(".grid-body .grid-row").remove();
 	}
 
 	reset_grid() {
@@ -532,10 +539,10 @@ export default class Grid {
 
 		// labels
 		if (this.header_row) {
-			$(this.parent).find(".grid-heading-row .grid-row").remove();
+			this.find_own(".grid-heading-row .grid-row").remove();
 		}
 		this.header_row = new GridRow({
-			parent: $(this.parent).find(".grid-heading-row"),
+			parent: this.find_own(".grid-heading-row"),
 			parent_df: this.df,
 			docfields: this.docfields,
 			frm: this.frm,
@@ -545,7 +552,7 @@ export default class Grid {
 		});
 
 		this.header_search = new GridRow({
-			parent: $(this.parent).find(".grid-heading-row"),
+			parent: this.find_own(".grid-heading-row"),
 			parent_df: this.df,
 			docfields: this.docfields,
 			frm: this.frm,
@@ -554,9 +561,9 @@ export default class Grid {
 		});
 		this.header_search.row.addClass("filter-row");
 		if (this.header_search.show_search || this.header_search.show_search_row()) {
-			$(this.parent).find(".grid-heading-row").addClass("with-filter");
+			this.find_own(".grid-heading-row").addClass("with-filter");
 		} else {
-			$(this.parent).find(".grid-heading-row").removeClass("with-filter");
+			this.find_own(".grid-heading-row").removeClass("with-filter");
 		}
 
 		this.filter_applied && this.update_search_columns();
@@ -596,7 +603,7 @@ export default class Grid {
 						let width = me.clamp_column_width(
 							start_width + dir * (ev.pageX - start_x)
 						);
-						me.wrapper.find(`.grid-static-col[data-fieldname="${fieldname}"]`).css({
+						me.find_own(`.grid-static-col[data-fieldname="${fieldname}"]`).css({
 							width: `${width}px`,
 							flex: `0 0 ${width}px`,
 						});
@@ -636,9 +643,10 @@ export default class Grid {
 		for (let [df, w] of this.visible_columns) {
 			if (df.sticky) {
 				this.sticky_offsets[df.fieldname] = sticky_sum;
-				this.wrapper
-					.find(`.grid-static-col[data-fieldname="${df.fieldname}"]`)
-					.css("inset-inline-start", `${sticky_sum}px`);
+				this.find_own(`.grid-static-col[data-fieldname="${df.fieldname}"]`).css(
+					"inset-inline-start",
+					`${sticky_sum}px`
+				);
 				sticky_sum += w;
 			}
 		}
@@ -675,7 +683,7 @@ export default class Grid {
 		this.data = this.get_data(this.filter_applied);
 
 		!this.wrapper && this.make();
-		let $rows = $(this.parent).find(".rows");
+		let $rows = this.find_own(".rows");
 
 		this.setup_fields();
 
@@ -708,7 +716,7 @@ export default class Grid {
 		this.grid_pagination.update_page_numbers();
 		this.render_result_rows($rows);
 		this.grid_pagination.check_page_number();
-		this.wrapper.find(".grid-empty").toggleClass("hidden", Boolean(this.data.length));
+		this.find_own(".grid-empty").toggleClass("hidden", Boolean(this.data.length));
 
 		// toolbar
 		this.setup_toolbar();
@@ -735,7 +743,7 @@ export default class Grid {
 
 	render_result_rows($rows) {
 		if (!$rows) {
-			$rows = $(this.parent).find(".rows");
+			$rows = this.find_own(".rows");
 		}
 
 		let result_length = this.grid_pagination.get_result_length();
@@ -824,7 +832,7 @@ export default class Grid {
 	setup_toolbar() {
 		const is_editable = this.is_editable();
 		if (is_editable) {
-			this.wrapper.find(".grid-footer").removeClass("hidden");
+			this.find_own(".grid-footer").removeClass("hidden");
 
 			const num_selected_rows = this.get_selected_children().length;
 			// show, hide buttons to add rows
@@ -834,30 +842,31 @@ export default class Grid {
 				num_selected_rows > 0
 			) {
 				// add 'hidden' to buttons
-				this.wrapper
-					.find(".grid-add-row, .grid-add-multiple-rows, .grid-duplicate-rows")
-					.addClass("hidden");
+				this.find_own(
+					".grid-add-row, .grid-add-multiple-rows, .grid-duplicate-rows"
+				).addClass("hidden");
 			} else {
 				// show buttons
-				this.wrapper.find(".grid-add-row").removeClass("hidden");
+				this.find_own(".grid-add-row").removeClass("hidden");
 
 				if (this.multiple_set) {
-					this.wrapper.find(".grid-add-multiple-rows").removeClass("hidden");
+					this.find_own(".grid-add-multiple-rows").removeClass("hidden");
 				}
 			}
 		} else if (
 			this.grid_rows.length < this.grid_pagination.page_length &&
 			!this.df.allow_bulk_edit
 		) {
-			this.wrapper.find(".grid-footer").addClass("hidden");
+			this.find_own(".grid-footer").addClass("hidden");
 		}
 
 		// don't be tempted to use the `.hidden` class here
 		// it is used in other logic for the same buttons and will cause conflicts
-		this.wrapper
-			.find(".grid-add-row, .grid-add-multiple-rows, .grid-upload")
-			.toggleClass("d-none", !is_editable);
-		this.wrapper.find(".grid-download").toggleClass("d-none", is_editable);
+		this.find_own(".grid-add-row, .grid-add-multiple-rows, .grid-upload").toggleClass(
+			"d-none",
+			!is_editable
+		);
+		this.find_own(".grid-download").toggleClass("d-none", is_editable);
 	}
 
 	setup_fields() {
@@ -1197,7 +1206,7 @@ export default class Grid {
 	}
 
 	toggle_checkboxes(enable) {
-		this.wrapper.find(".grid-row-check").prop("disabled", !enable);
+		this.find_own(".grid-row-check").prop("disabled", !enable);
 	}
 
 	get_docfield(fieldname) {
@@ -1240,7 +1249,7 @@ export default class Grid {
 	}
 
 	setup_add_row() {
-		this.wrapper.find(".grid-add-row").click(() => {
+		this.find_own(".grid-add-row").click(() => {
 			this.add_new_row(null, null, true, null, true);
 			this.set_focus_on_row();
 
@@ -1288,17 +1297,11 @@ export default class Grid {
 			if (show) {
 				if (idx) {
 					// always open inserted rows
-					this.wrapper
-						.find("[data-idx='" + idx + "']")
-						.data("grid_row")
-						.toggle_view(true, callback);
+					this.grid_rows[idx - 1].toggle_view(true, callback);
 				} else {
 					if (!this.allow_on_grid_editing()) {
 						// open last row only if on-grid-editing is disabled
-						this.wrapper
-							.find(".grid-row:last")
-							.data("grid_row")
-							.toggle_view(true, callback);
+						this.grid_rows[this.grid_rows.length - 1].toggle_view(true, callback);
 					}
 				}
 			}
@@ -1309,7 +1312,7 @@ export default class Grid {
 
 	renumber_based_on_dom() {
 		// renumber based on dom
-		let $rows = $(this.parent).find(".rows");
+		let $rows = this.find_own(".rows");
 
 		$rows.find(".grid-row").each((i, item) => {
 			let $item = $(item);
@@ -1337,8 +1340,15 @@ export default class Grid {
 			"name",
 			"parentfield",
 		];
+		const table_fields = frappe.meta.get_table_fields(d.doctype).map((df) => df.fieldname);
 		for (const [key, value] of Object.entries(copy_doc)) {
-			if (!skip.includes(key)) d[key] = value;
+			if (!skip.includes(key) && !table_fields.includes(key)) d[key] = value;
+		}
+		for (const fieldname of table_fields) {
+			d[fieldname] = [];
+			for (const row of copy_doc[fieldname] || []) {
+				frappe.model.copy_doc(row, false, d, fieldname);
+			}
 		}
 		return d;
 	}
@@ -1656,7 +1666,7 @@ export default class Grid {
 		if (this.multiple_set) return;
 
 		const link_field = frappe.meta.get_docfield(this.df.options, link);
-		const btn = $(this.wrapper).find(".grid-add-multiple-rows");
+		const btn = this.find_own(".grid-add-multiple-rows");
 
 		// show button
 		btn.removeClass("hidden");
