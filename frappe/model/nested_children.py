@@ -7,7 +7,11 @@ from collections import defaultdict
 
 import frappe
 from frappe.model.utils import is_virtual_doctype
+from frappe.utils import create_batch
 from frappe.utils.password import delete_child_row_passwords
+
+BATCH_SIZE = 1000
+MAX_TABLE_DEPTH = 5
 
 
 def load_descendants(rows_by_doctype: dict[str, list[dict]], for_update: bool = False) -> None:
@@ -24,6 +28,21 @@ def load_descendants(rows_by_doctype: dict[str, list[dict]], for_update: bool = 
 		rows_by_doctype = next_level
 
 
+def load_level(row, fieldname: str, child_doctype: str) -> None:
+	root, rows = _rows_at_level_of(row)
+	rows = [other for other in rows if fieldname not in other.__dict__]
+	children_by_parent = _children_by_parent(
+		[str(other.name) for other in rows],
+		row.doctype,
+		fieldname,
+		child_doctype,
+		bool(root.flags.for_update),
+	)
+	for other in rows:
+		other.__dict__[fieldname] = []
+		other.extend(fieldname, children_by_parent[str(other.name)])
+
+
 def delete_descendants(names_by_doctype: dict[str, list[str]]) -> None:
 	"""Delete every row nested below the given rows, one query per table per level."""
 	while names_by_doctype:
@@ -32,12 +51,47 @@ def delete_descendants(names_by_doctype: dict[str, list[str]]) -> None:
 			if not names:
 				continue
 			for fieldname, child_doctype in nested_tables(doctype):
-				filters = {"parent": ("in", names), "parenttype": doctype, "parentfield": fieldname}
-				if child_names := frappe.get_all(child_doctype, filters=filters, pluck="name"):
-					delete_child_row_passwords(child_doctype, {"name": ("in", child_names)})
-					frappe.db.delete(child_doctype, {"name": ("in", child_names)})
-					next_level[child_doctype].extend(child_names)
+				for batch in create_batch(names, BATCH_SIZE):
+					filters = {"parent": ("in", batch), "parenttype": doctype, "parentfield": fieldname}
+					if child_names := frappe.get_all(child_doctype, filters=filters, pluck="name"):
+						delete_child_row_passwords(child_doctype, {"name": ("in", child_names)})
+						frappe.db.delete(child_doctype, {"name": ("in", child_names)})
+						next_level[child_doctype].extend(child_names)
 		names_by_doctype = next_level
+
+
+def save_descendants(rows: list) -> None:
+	while rows:
+		rows_by_doctype = defaultdict(list)
+		for row in rows:
+			rows_by_doctype[row.doctype].append(row)
+
+		rows = []
+		for doctype, parents in rows_by_doctype.items():
+			for fieldname, child_doctype in nested_tables(doctype):
+				children = [child for parent in parents for child in parent.get(fieldname)]
+				parent_names = [str(parent.name) for parent in parents]
+				delete_removed_rows(child_doctype, doctype, fieldname, parent_names, children)
+				for child in children:
+					child.db_update()
+				rows.extend(children)
+
+
+def delete_removed_rows(
+	doctype: str, parenttype: str, parentfield: str, parent_names: list[str], kept_rows: list
+) -> None:
+	kept_rows = [row for row in kept_rows if row.name and not row.is_new()]
+	batches = list(create_batch(parent_names, BATCH_SIZE))
+	for batch in batches:
+		filters = {"parenttype": parenttype, "parentfield": parentfield, "parent": ("in", batch)}
+		batch_parents = set(batch)
+		if kept := [row.name for row in kept_rows if len(batches) == 1 or str(row.parent) in batch_parents]:
+			filters["name"] = ("not in", kept)
+
+		if nested_tables(doctype):
+			delete_descendants({doctype: frappe.get_all(doctype, filters=filters, pluck="name")})
+		delete_child_row_passwords(doctype, filters)
+		frappe.db.delete(doctype, filters)
 
 
 def descendant_doctypes(doctype: str, include_computed: bool = True) -> list[str]:
@@ -51,6 +105,10 @@ def descendant_doctypes(doctype: str, include_computed: bool = True) -> list[str
 				found.append(child_doctype)
 				pending.append(child_doctype)
 	return found
+
+
+def table_depth(doctype: str, istable: bool, child_doctype: str) -> int:
+	return _levels_above(doctype, istable) + 1 + _levels_below(child_doctype)
 
 
 def table_path(doctype: str, target: str) -> list[tuple[str, str, str]] | None:
@@ -99,18 +157,54 @@ def nested_tables(doctype: str) -> list[tuple[str, str]]:
 	]
 
 
-def _attach_children(rows, doctype, fieldname, child_doctype, for_update):
-	rows_by_name = {row.name: row for row in rows}
-	children = frappe.qb.get_query(
-		table=child_doctype,
-		filters={"parent": ("in", list(rows_by_name)), "parenttype": doctype, "parentfield": fieldname},
-		fields=["*"],
-		order_by="idx asc",
-		for_update=for_update,
-	).run(as_dict=True)
+def _levels_below(doctype: str) -> int:
+	return max((1 + _levels_below(child) for _, child in nested_tables(doctype)), default=0)
 
+
+def _levels_above(doctype: str, istable: bool) -> int:
+	if not istable:
+		return 0
+	parents = {
+		*frappe.get_all(
+			"DocField", {"fieldtype": "Table", "options": doctype, "parenttype": "DocType"}, pluck="parent"
+		),
+		*frappe.get_all("Custom Field", {"fieldtype": "Table", "options": doctype}, pluck="dt"),
+	}
+	return max((1 + _levels_above(parent, frappe.get_meta(parent).istable) for parent in parents), default=1)
+
+
+def _attach_children(rows, doctype, fieldname, child_doctype, for_update):
+	children_by_parent = _children_by_parent(
+		[str(row.name) for row in rows], doctype, fieldname, child_doctype, for_update
+	)
 	for row in rows:
-		row[fieldname] = []
-	for child in children:
-		rows_by_name[child.parent][fieldname].append(child)
-	return children
+		row[fieldname] = children_by_parent[str(row.name)]
+	return [child for row in rows for child in row[fieldname]]
+
+
+def _children_by_parent(parent_names, doctype, fieldname, child_doctype, for_update=False):
+	children_by_parent = defaultdict(list)
+	for batch in create_batch(parent_names, BATCH_SIZE):
+		for child in frappe.qb.get_query(
+			table=child_doctype,
+			filters={"parent": ("in", batch), "parenttype": doctype, "parentfield": fieldname},
+			fields=["*"],
+			order_by="idx asc",
+			for_update=for_update,
+		).run(as_dict=True):
+			children_by_parent[child.parent].append(child)
+	return children_by_parent
+
+
+def _rows_at_level_of(row) -> tuple:
+	path, root = [], row
+	while root.parent_doc is not None:
+		path.append(root.parentfield)
+		root = root.parent_doc
+
+	rows = [root]
+	for fieldname in reversed(path):
+		rows = [child for parent in rows for child in parent.__dict__.get(fieldname, [])]
+	if not any(other is row for other in rows):
+		rows.append(row)
+	return root, rows

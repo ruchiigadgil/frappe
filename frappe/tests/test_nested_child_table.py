@@ -1,6 +1,8 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 
+from unittest.mock import patch
+
 import frappe
 from frappe.client import delete_doc, insert_doc, set_value
 from frappe.core.doctype.doctype.test_doctype import new_doctype
@@ -152,6 +154,29 @@ class TestNestedChildTable(IntegrationTestCase):
 
 		self.assertEqual([[s.serial for s in row.serials] for row in doc.items], [["A1", "A2"], ["B1"]])
 
+	def test_lazy_doc_loads_each_nested_level_once_on_first_read(self):
+		name = self.make_parent().name
+		lazy = frappe.get_lazy_doc(PARENT, name)
+		[row.serials for row in lazy.items]
+
+		lazy = frappe.get_lazy_doc(PARENT, name)
+		with self.assertQueryCount(1):
+			items = lazy.items
+		with self.assertQueryCount(1):
+			serials = [[s.serial for s in row.serials] for row in items]
+
+		self.assertEqual(serials, [["A1", "A2"], ["B1"]])
+
+	def test_saving_a_lazy_doc_keeps_nested_rows_it_never_read(self):
+		doc = self.make_parent()
+		lazy = frappe.get_lazy_doc(PARENT, doc.name)
+		lazy.items[0].item = "A changed"
+		lazy.save()
+
+		self.assertEqual(
+			[[s.serial for s in self.stored_serials(row)] for row in doc.items], [["A1", "A2"], ["B1"]]
+		)
+
 	def test_get_docs_loads_grandchildren(self):
 		name = self.make_parent().name
 
@@ -180,6 +205,29 @@ class TestNestedChildTable(IntegrationTestCase):
 		doc.save()
 
 		self.assertEqual([s.serial for s in self.stored_serials(doc.items[0])], ["A1"])
+
+	def test_save_cleans_a_nested_table_once_for_all_its_parent_rows(self):
+		doc = self.make_parent()
+		doc.items[0].serials.pop(0)
+		doc.items[1].serials.pop(0)
+
+		with patch.object(frappe.db, "delete", wraps=frappe.db.delete) as delete:
+			doc.save()
+
+		self.assertEqual([call.args[0] for call in delete.call_args_list].count(GRANDCHILD), 1)
+		self.assertEqual([[s.serial for s in self.stored_serials(row)] for row in doc.items], [["A2"], []])
+
+	def test_load_save_and_delete_split_parent_rows_into_batches(self):
+		with patch("frappe.model.nested_children.BATCH_SIZE", 1):
+			doc = self.make_parent()
+			doc.items[0].serials.pop(0)
+			doc.save()
+
+			reloaded = frappe.get_doc(PARENT, doc.name)
+			self.assertEqual([[s.serial for s in row.serials] for row in reloaded.items], [["A2"], ["B1"]])
+
+			reloaded.delete()
+			self.assertFalse(frappe.get_all(GRANDCHILD, {"parent": ("in", [r.name for r in doc.items])}))
 
 	def test_editing_a_grandchild_keeps_its_value_before_save(self):
 		doc = self.make_parent()
@@ -214,6 +262,11 @@ class TestNestedChildTable(IntegrationTestCase):
 				grandchild = frappe.get_doc("DocType", GRANDCHILD)
 				grandchild.append("fields", {"fieldname": "loop", "fieldtype": "Table", "options": options})
 				self.assertRaises(frappe.ValidationError, grandchild.save)
+
+	def test_child_tables_cannot_nest_deeper_than_the_limit(self):
+		with patch("frappe.core.doctype.doctype.doctype.MAX_TABLE_DEPTH", 1):
+			self.assertRaises(frappe.ValidationError, frappe.get_doc("DocType", CHILD).save)
+		frappe.get_doc("DocType", CHILD).save()
 
 	def test_meta_bundle_includes_every_nested_child_doctype(self):
 		self.assertEqual([meta["name"] for meta in get_meta_bundle(PARENT)], [PARENT, CHILD, GRANDCHILD])

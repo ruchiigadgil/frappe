@@ -55,11 +55,13 @@ from frappe.model.docstatus import DocStatus
 from frappe.model.dynamic_links import invalidate_distinct_link_doctypes
 from frappe.model.naming import set_new_name, validate_name
 from frappe.model.nested_children import (
-	delete_descendants,
+	delete_removed_rows,
 	descendant_doctypes,
 	get_root,
 	load_descendants,
+	load_level,
 	nested_tables,
+	save_descendants,
 )
 from frappe.model.utils import is_virtual_doctype, simple_singledispatch
 from frappe.model.utils.link_count import notify_link_count
@@ -1242,24 +1244,13 @@ class Document(_DocumentBase):
 			df.options in (self.flags.ignore_children_type or ())
 			or frappe.get_meta(df.options).is_virtual == 1
 		):
-			existing_row_names = [row.name for row in all_rows if row.name and not row.is_new()]
-
-			from frappe.utils.password import delete_child_row_passwords
-
-			removed_rows = {"parent": str(self.name), "parenttype": self.doctype, "parentfield": fieldname}
-			if existing_row_names:
-				removed_rows["name"] = ("not in", existing_row_names)
-
-			if nested_tables(df.options):
-				delete_descendants({df.options: frappe.get_all(df.options, filters=removed_rows, pluck="name")})
-			delete_child_row_passwords(df.options, removed_rows)
-			frappe.db.delete(df.options, removed_rows)
+			delete_removed_rows(df.options, self.doctype, fieldname, [str(self.name)], all_rows)
 
 		# update / insert
 		for d in all_rows:
 			d: Document
 			d.db_update()
-			d.update_children()
+		save_descendants(all_rows)
 
 	def reset_computed_child_tables(self):
 		"""Reset computed child tables so that they are reloaded next time"""
@@ -3021,6 +3012,9 @@ class Document(_DocumentBase):
 			for i, _d in enumerate(self.get(doc.parentfield)):
 				_d.idx = i + 1
 
+	def _child_controller(self, doctype: str) -> type["Document"]:
+		return get_controller(doctype)
+
 	def _init_child(self, value, key):
 		if isinstance(value, Document):
 			child = value
@@ -3030,7 +3024,7 @@ class Document(_DocumentBase):
 				raise AttributeError(key)
 
 			value["doctype"] = doctype
-			controller = get_controller(doctype)
+			controller = self._child_controller(doctype)
 			child = controller.__new__(controller)
 			child.__init__(value)
 
@@ -4406,6 +4400,10 @@ class LazyDocument:
 		# Avoid initializing anything, descriptor handles it.
 		return
 
+	@override
+	def _child_controller(self, doctype: str) -> type["Document"]:
+		return get_lazy_controller(doctype) if nested_tables(doctype) else get_controller(doctype)
+
 
 class LazyChildTable:
 	__slots__ = ("doctype", "fieldname")
@@ -4419,9 +4417,12 @@ class LazyChildTable:
 		fieldname = self.fieldname
 		__dict = doc.__dict__
 		assert fieldname not in __dict, "Descriptor should not override existing values"
+		if __dict.get("parenttype"):
+			load_level(doc, fieldname, self.doctype)
+			return __dict[fieldname]
+
 		__dict[fieldname] = []
 		children = doc._load_child_table_from_db(fieldname, self.doctype) or []
-		load_descendants({self.doctype: children})
 		# Update __dict__ and convert to Document objects
 		doc.extend(fieldname, children)
 		return __dict[fieldname]

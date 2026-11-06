@@ -33,6 +33,7 @@ from frappe.model import (
 from frappe.model.docfield import supports_translation
 from frappe.model.document import RESERVED_KEYWORDS, Document, get_controller
 from frappe.model.meta import Meta
+from frappe.model.nested_children import MAX_TABLE_DEPTH, table_depth
 from frappe.modules import get_doc_path, make_boilerplate
 from frappe.modules.import_file import get_file_path
 from frappe.permissions import ALL_USER_ROLE, AUTOMATIC_ROLES, SYSTEM_USER_ROLE
@@ -1801,6 +1802,14 @@ def validate_fields(meta: Meta):
 					frappe.bold(doctype), frappe.bold(docfield.fieldname), frappe.bold(meta.name)
 				),
 				title=_("Invalid Option"),
+			)
+
+		if (depth := table_depth(meta.name, meta.istable, doctype)) > MAX_TABLE_DEPTH:
+			frappe.throw(
+				_(
+					"Child tables can be nested at most {0} levels deep. Field {1} would make {2} levels."
+				).format(MAX_TABLE_DEPTH, frappe.bold(docfield.fieldname), depth),
+				title=_("Too Many Levels"),
 			)
 
 	def check_max_height(docfield):

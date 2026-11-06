@@ -652,12 +652,10 @@
 
 .grid-row-open .form-in-grid {
 	opacity: 1;
-	height: 90vh;
-	overflow: hidden;
-	display: flex;
-	flex-direction: column;
+	height: auto;
+	overflow: auto;
 	margin: auto;
-	padding: var(--padding-sm) var(--padding-md) 0;
+	padding: var(--padding-sm) var(--padding-md);
 	position: fixed;
 	top: 5%;
 	left: 0;
@@ -669,22 +667,37 @@
 	}
 
 	.grid-form-body {
-		flex: 1;
-		min-height: 0;
+		max-height: 80vh;
+		overflow: auto;
+	}
+
+	&.nested-grid-form {
+		height: 90vh;
+		overflow: hidden;
 		display: flex;
 		flex-direction: column;
-	}
+		padding-bottom: 0;
 
-	.form-area {
-		flex: 1;
-		overflow-y: auto;
-	}
+		.grid-form-body {
+			flex: 1;
+			min-height: 0;
+			max-height: none;
+			overflow: visible;
+			display: flex;
+			flex-direction: column;
+		}
 
-	.grid-footer-toolbar {
-		margin: 0 calc(-1 * var(--padding-md));
-		padding: var(--padding-sm) calc(2 * var(--padding-md));
-		background-color: var(--subtle-fg);
-		border-top: 1px solid var(--border-color);
+		.form-area {
+			flex: 1;
+			overflow-y: auto;
+		}
+
+		.grid-footer-toolbar {
+			margin: 0 calc(-1 * var(--padding-md));
+			padding: var(--padding-sm) calc(2 * var(--padding-md));
+			background-color: var(--subtle-fg);
+			border-top: 1px solid var(--border-color);
+		}
 	}
 
 	// Tabs styling for child table grid row forms

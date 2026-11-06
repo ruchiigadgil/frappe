@@ -7,7 +7,7 @@ export default class GridRowForm {
 		var me = this;
 		this.make_form();
 		this.form_area.empty();
-		frappe.utils.scroll_to(0, false, 0, this.form_area);
+		frappe.utils.scroll_to(0, false, 0, this.wrapper.find(".grid-form-body"));
 
 		this.layout = new frappe.ui.form.Layout({
 			fields: this.row.docfields,
@@ -35,6 +35,7 @@ export default class GridRowForm {
 
 		this.toggle_add_delete_button_display(this.wrapper);
 		this.render_breadcrumbs();
+		this.wrapper.toggleClass("nested-grid-form", this.is_nested_form());
 
 		this.row.grid.open_grid_row = this;
 
@@ -142,6 +143,12 @@ export default class GridRowForm {
 			$breadcrumbs.append(frappe.utils.icon("chevron-right", "xs"));
 		});
 		$breadcrumbs.append(`<span>${this.get_table_label(this.row)}</span>`);
+	}
+	is_nested_form() {
+		return (
+			this.get_parent_rows().length > 0 ||
+			this.row.docfields.some((df) => df.fieldtype === "Table")
+		);
 	}
 	get_parent_rows() {
 		const rows = [];
