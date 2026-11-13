@@ -5,6 +5,7 @@ import datetime
 
 import frappe
 import frappe.defaults
+from frappe import _
 from frappe.locale import get_date_format
 from frappe.utils import add_to_date, get_datetime, getdate
 from frappe.utils.data import (
@@ -134,13 +135,16 @@ def get_from_date_from_timespan(to_date, timespan):
 
 
 def get_period(date, interval="Monthly"):
+	import babel.dates
+
 	date = getdate(date)
-	months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 	return {
 		"Daily": date.strftime("%d-%m-%y"),
 		"Weekly": date.strftime("%d-%m-%y"),
-		"Monthly": str(months[date.month - 1]) + " " + str(date.year),
-		"Quarterly": "Quarter " + str(((date.month - 1) // 3) + 1) + " " + str(date.year),
+		"Monthly": babel.dates.format_date(
+			date, "MMM y", locale=(frappe.local.lang or "en").replace("-", "_")
+		),
+		"Quarterly": _("Quarter {0} {1}").format(((date.month - 1) // 3) + 1, date.year),
 		"Yearly": str(date.year),
 	}[interval]
 
